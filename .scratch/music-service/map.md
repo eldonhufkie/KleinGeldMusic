@@ -44,6 +44,8 @@ A buildable spec for a web-only first version of KleinGeld Music: Members join t
 - [Choose login and email approach](issues/08-login-and-email.md): ASP.NET Core Identity, email + password (passkeys and 2FA optional); every emailed link valid 15 min; Gmail SMTP with an app password until a domain allows Resend; five transactional emails.
 - [Player features and first load for the first version](issues/09-player-and-first-load.md): volume, shuffle, repeat, Play next / Add to queue; play replaces the Queue with the list played from; Queue and settings in `localStorage`; Media Session; no prerendering, loading screen instead.
 - [Release and Track details at upload](issues/10-release-and-track-details.md): Release type Album/EP/Single; required and optional fields; 500 MB audio, 1–50 Tracks, square ≥1000 px JPEG/PNG cover; Submit only when all Tracks converted; only Track changes need re-review; replacing keeps the Track.
+- [Admin review of Submitted Releases](issues/11-admin-review.md): Review page + badge + Admin email; whole-Release approve/reject with a required reason; Withdraw; Track changes on Published Releases wait as Pending Changes while the old version stays live; Admin rejects or deletes (never Takedown); nine emails in total.
+- [Deploying to a TrueNAS custom app from Azure DevOps](issues/15-deploy-to-truenas-research.md): 24.10 is archived and can't store registry credentials (25.04+ can); routes are a self-hosted agent, or a hosted agent joining the tailnet then SSH/`midclt`; Aspire's `.env` compose output needs an `include:` wrapper; migrations via bundle, migrator worker, or `MigrateAsync()`.
 
 ## Not yet specified
 

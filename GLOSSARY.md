@@ -35,11 +35,19 @@ What kind of Release it is, chosen by its Artist: **Album**, **EP**, or **Single
 _Avoid_: Format, category
 
 **Draft** / **Submitted** / **Published** / **Rejected**:
-The stages of a Release: being prepared by its Artist; awaiting the Admin's review; visible to all Members; returned by the Admin with a reason.
+The stages of a Release: being prepared by its Artist; awaiting the Admin's review; visible to all Members; returned by the Admin with a reason (whether it was Submitted or already Published).
 _Avoid_: Pending, live, approved, declined
 
+**Withdraw**:
+An Artist taking back its Submitted Release before the Admin has reviewed it, returning it to Draft.
+_Avoid_: Cancel, retract, unsubmit
+
+**Pending Changes**:
+Added, removed or replaced Tracks on a Published Release that wait for the Admin's review while Members keep seeing the Release as it was. A Release has at most one set. Pending Changes are Draft, Submitted or Rejected; once approved they become part of the Release.
+_Avoid_: Revision, update, new version
+
 **Takedown**:
-An Artist hiding its own Published Release from other Members; it can later be resubmitted.
+An Artist hiding its own Published Release from other Members; it can later be resubmitted. The Admin never does a Takedown; the Admin Rejects or deletes.
 _Avoid_: Unpublish, delete
 
 **Unavailable Track**:
