@@ -63,7 +63,7 @@ An Artist hiding its own Published Release from other Members; it can later be r
 _Avoid_: Unpublish, delete
 
 **Unavailable Track**:
-A Track on a Playlist that can no longer be played because its Release was taken down or deleted, or the Track was removed from its Release; shown greyed out rather than removed.
+A Track on a Playlist that can no longer be played because its Release was taken down or deleted, or the Track was removed from its Release; shown greyed out rather than removed, and playable again if its Release is Published again.
 _Avoid_: Broken track, missing track
 
 **Single mark**:
@@ -75,7 +75,7 @@ An Artist's statement, made when submitting a Release, that they own the rights 
 _Avoid_: Copyright check, licence
 
 **Playlist**:
-A Member's personal, ordered list of Tracks drawn from any Releases.
+A Member's personal, ordered list of Tracks drawn from any Releases; a Track appears on it at most once.
 _Avoid_: Queue, mix, collection
 
 **Queue**:
