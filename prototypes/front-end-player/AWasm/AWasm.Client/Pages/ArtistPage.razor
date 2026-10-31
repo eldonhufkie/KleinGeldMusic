@@ -1,0 +1,18 @@
+@page "/artists/{Id:int}"
+
+<PageTitle>@artist.Name</PageTitle>
+
+<h1>@artist.Name</h1>
+<ul>
+    @foreach (var r in Catalog.ReleasesOf(artist))
+    {
+        <li><a href="releases/@r.Id">@r.Title</a> (@r.Year)</li>
+    }
+</ul>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    Artist artist = default!;
+
+    protected override void OnParametersSet() => artist = Catalog.Artists.First(a => a.Id == Id);
+}

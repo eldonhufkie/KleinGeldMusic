@@ -1,0 +1,24 @@
+﻿@inherits LayoutComponentBase
+
+<header>
+    <strong>KleinGeld Music · PROTOTYPE C (static SSR)</strong>
+    <a href="">Artists</a>
+    <a href="playlist">My Playlist</a>
+</header>
+
+<main>@Body</main>
+
+@* data-permanent: enhanced navigation keeps this element (and the playing <audio>) as it is.
+   The server renders only the empty shell; player.js fills it in and owns all player state. *@
+<div id="player" class="player" data-permanent>
+    <audio preload="metadata"></audio>
+    <div class="row">
+        <button data-action="previous" disabled>⏮</button>
+        <button data-action="toggle" disabled>▶</button>
+        <button data-action="next" disabled>⏭</button>
+        <span data-el="now">Nothing playing</span>
+        <span data-el="time">0:00 / 0:00</span>
+        <input data-el="seek" type="range" min="0" max="0" step="0.1" value="0" />
+    </div>
+    <div class="diag" data-el="diag">player script not loaded yet</div>
+</div>

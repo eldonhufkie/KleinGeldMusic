@@ -1,0 +1,55 @@
+@page "/releases/{Id:int}"
+@implements IDisposable
+@inject PlayerService Player
+@inject PlaylistStore Playlist
+
+<PageTitle>@release.Title</PageTitle>
+
+<h1>@release.Title</h1>
+<p>by <a href="artists/@release.ArtistId">@Catalog.ArtistOf(release).Name</a> · @release.Year</p>
+
+<table>
+    @foreach (var (t, i) in tracks.Select((t, i) => (t, i)))
+    {
+        <tr class="@(Player.Current?.TrackId == t.Id ? "now-playing" : null)">
+            <td>@t.Number</td>
+            <td>
+                @t.Title
+                @if (t.IsSingle) { <span class="single">S</span> }
+            </td>
+            <td>
+                <button @onclick="() => Player.PlayAsync(Catalog.QueueFor(release), i)">▶ Play</button>
+                <button @onclick="() => Add(t)">+ Playlist</button>
+            </td>
+        </tr>
+    }
+</table>
+@if (added is not null)
+{
+    <p>Added “@added” to My Playlist.</p>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    Release release = default!;
+    List<Track> tracks = [];
+    string? added;
+
+    protected override void OnInitialized() => Player.Changed += OnChanged;
+
+    protected override void OnParametersSet()
+    {
+        release = Catalog.Releases.First(r => r.Id == Id);
+        tracks = Catalog.TracksOf(release).ToList();
+        added = null;
+    }
+
+    void Add(Track t)
+    {
+        Playlist.Add(t.Id);
+        added = t.Title;
+    }
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Player.Changed -= OnChanged;
+}

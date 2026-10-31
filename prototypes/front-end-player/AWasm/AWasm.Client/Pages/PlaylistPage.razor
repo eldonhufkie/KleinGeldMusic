@@ -1,0 +1,48 @@
+@page "/playlist"
+@implements IDisposable
+@inject PlayerService Player
+@inject PlaylistStore Playlist
+
+<PageTitle>My Playlist</PageTitle>
+
+<h1>My Playlist</h1>
+@if (queue.Count == 0)
+{
+    <p>Empty. Add Tracks from a Release page.</p>
+}
+<table>
+    @foreach (var (q, i) in queue.Select((q, i) => (q, i)))
+    {
+        <tr class="@(Player.Current?.TrackId == q.TrackId ? "now-playing" : null)">
+            <td>
+                @q.Title
+                @if (q.IsSingle) { <span class="single">S</span> }
+            </td>
+            <td>@q.ArtistName · <a href="releases/@q.ReleaseId">@q.ReleaseTitle</a></td>
+            <td>
+                <button @onclick="() => Player.PlayAsync(queue, i)">▶ Play</button>
+                <button @onclick="() => Playlist.RemoveAt(i)">Remove</button>
+            </td>
+        </tr>
+    }
+</table>
+
+@code {
+    List<QueueItem> queue = [];
+
+    protected override void OnInitialized()
+    {
+        queue = Playlist.Queue();
+        Player.Changed += OnChanged;
+        Playlist.Changed += OnPlaylistChanged;
+    }
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+    void OnPlaylistChanged() { queue = Playlist.Queue(); StateHasChanged(); }
+
+    public void Dispose()
+    {
+        Player.Changed -= OnChanged;
+        Playlist.Changed -= OnPlaylistChanged;
+    }
+}

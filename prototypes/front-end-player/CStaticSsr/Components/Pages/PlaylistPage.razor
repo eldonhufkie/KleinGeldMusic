@@ -1,0 +1,44 @@
+@page "/playlist"
+@inject PlaylistStore Playlist
+
+<PageTitle>My Playlist</PageTitle>
+
+<h1>My Playlist</h1>
+@if (queue.Count == 0)
+{
+    <p>Empty. Add Tracks from a Release page.</p>
+}
+<form method="post" @formname="remove-from-playlist" @onsubmit="Remove" data-enhance>
+    <AntiforgeryToken />
+    <table>
+        <tbody data-queue="@JsonSerializer.Serialize(queue, JsonSerializerOptions.Web)">
+            @foreach (var (q, i) in queue.Select((q, i) => (q, i)))
+            {
+                <tr data-track-id="@q.TrackId">
+                    <td>
+                        @q.Title
+                        @if (q.IsSingle) { <span class="single">S</span> }
+                    </td>
+                    <td>@q.ArtistName · <a href="releases/@q.ReleaseId">@q.ReleaseTitle</a></td>
+                    <td>
+                        <button type="button" data-play data-index="@i">▶ Play</button>
+                        <button name="RemoveIndex" value="@i">Remove</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</form>
+
+@code {
+    [SupplyParameterFromForm] public int? RemoveIndex { get; set; }
+    List<QueueItem> queue = [];
+
+    protected override void OnInitialized() => queue = Playlist.Queue();
+
+    void Remove()
+    {
+        if (RemoveIndex is int i) Playlist.RemoveAt(i);
+        queue = Playlist.Queue();
+    }
+}
