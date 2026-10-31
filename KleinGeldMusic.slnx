@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/KleinGeld.AppHost/KleinGeld.AppHost.csproj" />
+    <Project Path="src/KleinGeld.Contracts/KleinGeld.Contracts.csproj" />
     <Project Path="src/KleinGeld.Data/KleinGeld.Data.csproj" />
     <Project Path="src/KleinGeld.Migrator/KleinGeld.Migrator.csproj" />
     <Project Path="src/KleinGeld.ServiceDefaults/KleinGeld.ServiceDefaults.csproj" />

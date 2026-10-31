@@ -2,7 +2,15 @@
 
 <PageTitle>KleinGeld Music</PageTitle>
 
-<main class="landing">
-    <h1>KleinGeld Music</h1>
-    <p>An invite-only music platform where a small group of Artists publish their own music and approved Members stream it.</p>
-</main>
+<AuthorizeView>
+    <Authorized>
+        <h1>Home</h1>
+    </Authorized>
+    <NotAuthorized>
+        <main class="landing">
+            <h1>KleinGeld Music</h1>
+            <p>An invite-only music platform where a small group of Artists publish their own music and approved Members stream it.</p>
+            <p><a href="Account/Login">Log in</a></p>
+        </main>
+    </NotAuthorized>
+</AuthorizeView>

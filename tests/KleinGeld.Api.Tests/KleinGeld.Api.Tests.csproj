@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\KleinGeld.AppHost\KleinGeld.AppHost.csproj" />
+    <ProjectReference Include="..\..\src\KleinGeld.Contracts\KleinGeld.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

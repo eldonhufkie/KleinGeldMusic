@@ -1,7 +1,18 @@
 ﻿@inherits LayoutComponentBase
 
 <div class="app-shell">
-    @Body
+    <AuthorizeView>
+        <Authorized>
+            <NavMenu />
+            <div class="app-main">
+                <ProfileMenu />
+                @Body
+            </div>
+        </Authorized>
+        <NotAuthorized>
+            @Body
+        </NotAuthorized>
+    </AuthorizeView>
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>
