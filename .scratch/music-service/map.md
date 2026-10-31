@@ -14,10 +14,10 @@ A buildable spec for a web-only first version of KleinGeld Music: Members join t
 - Hosting: the owner's TrueNAS SCALE server, reached via Tailscale Funnel; audio in Azure Blob Storage (see the hosting decision).
 - No custom domain until after a working first version.
 - Language: the UI and emails are English only for now.
-- Source code is in Azure DevOps (`origin`). Tracker is local markdown in this folder.
+- Source code is moving from Azure DevOps (`origin`) to a public GitHub repository, with GitHub Actions for CI/CD (see the deployment decision). Tracker is local markdown in this folder.
 - [microsoft/dotnet-podcasts](https://github.com/microsoft/dotnet-podcasts) is reference material only: archived, and too complex to build on.
 - Grilling tickets: call the Skill tool for "grilling" and "domain-modeling".
-- Carry into the spec (setup chores, not decisions): provisioning the Azure storage account and its CORS rules for the `ts.net` address, Tailscale Funnel setup, a persistent volume for ASP.NET Core Data Protection keys, the dedicated Gmail account and its app password.
+- Carry into the spec (setup chores, not decisions): provisioning the Azure storage account and its CORS rules for the `ts.net` address, Tailscale Funnel setup, a persistent volume for ASP.NET Core Data Protection keys, the dedicated Gmail account and its app password; moving the repository to GitHub with push protection; the Tailscale OAuth client, `tag:ci` ACL and the `deploy` user with its forced-command key; the `kleingeld` and `kleingeld-test` dataset folders and custom-app stubs.
 
 ### Decisions made while charting
 
@@ -46,6 +46,7 @@ A buildable spec for a web-only first version of KleinGeld Music: Members join t
 - [Release and Track details at upload](issues/10-release-and-track-details.md): Release type Album/EP/Single; required and optional fields; 500 MB audio, 1–50 Tracks, square ≥1000 px JPEG/PNG cover; Submit only when all Tracks converted; only Track changes need re-review; replacing keeps the Track.
 - [Admin review of Submitted Releases](issues/11-admin-review.md): Review page + badge + Admin email; whole-Release approve/reject with a required reason; Withdraw; Track changes on Published Releases wait as Pending Changes while the old version stays live; Admin rejects or deletes (never Takedown); nine emails in total.
 - [Deploying to a TrueNAS custom app from Azure DevOps](issues/15-deploy-to-truenas-research.md): 24.10 is archived and can't store registry credentials (25.04+ can); routes are a self-hosted agent, or a hosted agent joining the tailnet then SSH/`midclt`; Aspire's `.env` compose output needs an `include:` wrapper; migrations via bundle, migrator worker, or `MigrateAsync()`.
+- [Choose how new versions are deployed](issues/16-choose-deployment.md): TrueNAS 25.10; custom app is an `include:` stub with hand-written `secrets.env`; migrator worker plus `pg_isready` healthcheck; public GitHub repo, Actions, public GHCR images; runner joins Tailscale and SSHes to a forced-command `deploy.sh`; merge to `main` deploys to a tailnet-only Test, a "Live" approval deploys the same tag to Production.
 
 ## Not yet specified
 
@@ -61,3 +62,4 @@ A buildable spec for a web-only first version of KleinGeld Music: Members join t
 - A licensed commercial catalog.
 - Public sign-up without Admin approval.
 - Buying a custom domain (planned after a working first version; then Resend email and a nicer address than `ts.net`).
+- A portfolio showcase site (e.g. on Vercel). Hosting the front end on Vercel would break the same-origin login cookie the audio stream relies on; decided in [Choose how new versions are deployed](issues/16-choose-deployment.md).
