@@ -28,9 +28,11 @@ jobs:
       # The API tests call the web host over HTTPS; on Linux, .NET only sees the trusted
       # dev certificate when SSL_CERT_DIR includes its folder.
       - name: Trust the HTTPS development certificate
+        # Exit code 4 means only some certificate stores (e.g. browsers' NSS) took it; .NET's OpenSSL one is what matters.
         run: |
-          dotnet dev-certs https --trust
-          echo "SSL_CERT_DIR=$HOME/.aspnet/dev-certs/trust:/usr/lib/ssl/certs" >> "$GITHUB_ENV"
+          export SSL_CERT_DIR="$HOME/.aspnet/dev-certs/trust:/usr/lib/ssl/certs"
+          echo "SSL_CERT_DIR=$SSL_CERT_DIR" >> "$GITHUB_ENV"
+          dotnet dev-certs https --trust || [ $? -eq 4 ]
 
       - name: Build
         run: dotnet build KleinGeldMusic.slnx
