@@ -21,3 +21,6 @@ Decide, using [Hosting: Azure vs VPS vs home server](02-hosting-options.md) and 
 - **Database**: **PostgreSQL**, a container in the same Compose stack.
 - **Accepted trade-offs**: a Takedown fully applies only once already-issued read links expire (up to ~1 hour); home power/ISP outages take the service down; Funnel is in beta; no custom domain until after the first version, so production email can't use Resend yet (carried into the login and email ticket).
 - ADR: [Audio lives in Azure Blob Storage while the app runs at home](../../../docs/adr/0001-audio-in-azure-blob-while-app-runs-at-home.md).
+
+
+**Amended 2026-10-31** (streaming reconciliation, see the [spec](../spec.md)): play links are ~10-minute SAS links signed against a stored access policy that the API rotates whenever access is taken away, so loss of access applies within about 30 seconds; the player fetches a fresh link when playback fails.

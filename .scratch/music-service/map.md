@@ -1,6 +1,7 @@
 # Map: KleinGeld Music first version
 
 Label: wayfinder:map
+Spec: [#3 KleinGeld Music first version](https://github.com/eldonhufkie/KleinGeldMusic/issues/3) (`ready-for-agent`; tickets are its sub-issues #4–#51)
 
 ## Destination
 
@@ -28,6 +29,7 @@ A buildable spec for a web-only first version of KleinGeld Music: Members join t
 - Rights: every Release carries a Rights Declaration **and** is reviewed by the Admin before publishing.
 - A Track belongs to exactly one Release. A Track can carry a Single mark ('S' badge).
 - Playlists are private to their Member.
+- Streaming (reconciling tickets 03 and 07, decided while writing the spec): the API checks access and hands out ~10-minute SAS play links signed against a stored access policy; the policy rotates when access is taken away (within ~30 s); the player refetches a link on failure. Audio never passes through the home server.
 - Front-end options considered: (A) Blazor WebAssembly with global interactivity, (B) Blazor Server with global interactivity, (C) Blazor static SSR + enhanced navigation with the player marked `data-permanent`, (D) a JS single-page app. Only A and C are prototyped; B and D stay noted as alternatives.
 
 ## Decisions so far

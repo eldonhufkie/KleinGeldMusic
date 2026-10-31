@@ -31,3 +31,6 @@ Decided by Eldon Hufkie on 2026-10-31 in a grilling session.
 - **Cut off at once**: a Removed Member's sessions stop immediately; their next request, including an audio stream request, is refused (don't wait for Identity's default 30-minute security-stamp check).
 - **Glossary**: added **Leave**, **Remove** and **Stop managing**; **Artist** now says it is deleted with its last managing Member.
 - No ADR: all of this is cheap to change before launch.
+
+
+**Amended 2026-10-31** (streaming reconciliation, see the [spec](../spec.md)): play links are ~10-minute SAS links signed against a stored access policy that the API rotates whenever access is taken away, so loss of access applies within about 30 seconds; the player fetches a fresh link when playback fails.
