@@ -1,0 +1,11 @@
+﻿@page "/"
+
+<PageTitle>Artists</PageTitle>
+
+<h1>Artists</h1>
+<ul>
+    @foreach (var a in Catalog.Artists)
+    {
+        <li><a href="artists/@a.Id">@a.Name</a></li>
+    }
+</ul>

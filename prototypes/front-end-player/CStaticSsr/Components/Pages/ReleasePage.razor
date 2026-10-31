@@ -1,0 +1,50 @@
+@page "/releases/{Id:int}"
+@inject PlaylistStore Playlist
+
+<PageTitle>@release.Title</PageTitle>
+
+<h1>@release.Title</h1>
+<p>by <a href="artists/@release.ArtistId">@Catalog.ArtistOf(release).Name</a> · @release.Year</p>
+
+@* "+ Playlist" is a real form post. Without data-enhance it would be a full page load and stop the music. *@
+<form method="post" @formname="add-to-playlist" @onsubmit="Add" data-enhance>
+    <AntiforgeryToken />
+    <table>
+        <tbody data-queue="@JsonSerializer.Serialize(Catalog.QueueFor(release), JsonSerializerOptions.Web)">
+            @foreach (var (t, i) in Catalog.TracksOf(release).Select((t, i) => (t, i)))
+            {
+                <tr data-track-id="@t.Id">
+                    <td>@t.Number</td>
+                    <td>
+                        @t.Title
+                        @if (t.IsSingle) { <span class="single">S</span> }
+                    </td>
+                    <td>
+                        <button type="button" data-play data-index="@i">▶ Play</button>
+                        <button name="TrackId" value="@t.Id">+ Playlist</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</form>
+@if (added is not null)
+{
+    <p>Added “@added” to My Playlist.</p>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    [SupplyParameterFromForm] public int? TrackId { get; set; }
+    Release release = default!;
+    string? added;
+
+    protected override void OnParametersSet() => release = Catalog.Releases.First(r => r.Id == Id);
+
+    void Add()
+    {
+        if (TrackId is not int id) return;
+        Playlist.Add(id);
+        added = Catalog.Tracks.First(t => t.Id == id).Title;
+    }
+}

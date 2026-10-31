@@ -1,0 +1,68 @@
+@using System.Globalization
+@implements IDisposable
+@inject PlayerService Player
+@inject NavigationManager Nav
+
+<div class="player">
+    <audio @ref="audio" preload="metadata"></audio>
+    <div class="row">
+        <button @onclick="Player.PreviousAsync" disabled="@(Player.Current is null)">⏮</button>
+        <button @onclick="Player.ToggleAsync" disabled="@(Player.Current is null)">@(Player.IsPlaying ? "⏸" : "▶")</button>
+        <button @onclick="Player.NextAsync" disabled="@(Player.Current is null)">⏭</button>
+        @if (Player.Current is { } c)
+        {
+            <span>
+                <strong>@c.Title</strong>
+                @if (c.IsSingle) { <span class="single">S</span> }
+                · @c.ArtistName · <a href="releases/@c.ReleaseId">@c.ReleaseTitle</a>
+            </span>
+        }
+        else
+        {
+            <span>Nothing playing</span>
+        }
+        <span>@Fmt(Player.Position) / @Fmt(Player.Duration)</span>
+        <input type="range" min="0" max="@Player.Duration.ToString(CultureInfo.InvariantCulture)" step="0.1"
+               value="@Player.Position.ToString(CultureInfo.InvariantCulture)" @onchange="Seek" />
+    </div>
+    <div class="diag">
+        @if (RendererInfo.IsInteractive)
+        {
+            <span>interactive at @Player.InteractiveAtMs?.ToString("F0") ms after page start</span>
+        }
+        else
+        {
+            <span class="badge">prerendered: buttons do nothing until WebAssembly has loaded</span>
+        }
+        · audio element born @(Player.AudioBornAt ?? "-") · client-side navigations: @navigations
+    </div>
+</div>
+
+@code {
+    ElementReference audio;
+    int navigations;
+
+    protected override void OnInitialized()
+    {
+        Player.Changed += OnChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await Player.AttachAsync(audio);
+    }
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+    void OnLocationChanged(object? sender, LocationChangedEventArgs e) { navigations++; StateHasChanged(); }
+
+    Task Seek(ChangeEventArgs e) => Player.SeekAsync(double.Parse((string)e.Value!, CultureInfo.InvariantCulture));
+
+    static string Fmt(double s) => TimeSpan.FromSeconds(double.IsFinite(s) ? s : 0).ToString(@"m\:ss");
+
+    public void Dispose()
+    {
+        Player.Changed -= OnChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

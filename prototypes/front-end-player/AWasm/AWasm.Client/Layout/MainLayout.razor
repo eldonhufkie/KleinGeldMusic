@@ -1,0 +1,18 @@
+﻿@inherits LayoutComponentBase
+
+<header>
+    <strong>KleinGeld Music · PROTOTYPE A (WebAssembly)</strong>
+    <a href="">Artists</a>
+    <a href="playlist">My Playlist</a>
+</header>
+
+<main>@Body</main>
+
+@* Outside @Body, so navigating never re-renders or replaces it. *@
+<PlayerBar />
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>

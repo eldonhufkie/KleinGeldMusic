@@ -1,0 +1,16 @@
+/* PROTOTYPE styles, identical in both variants. */
+body { font-family: system-ui, sans-serif; margin: 0; padding-bottom: 9rem; background: #fafafa; color: #222; }
+header { background: #1f2937; color: #fff; padding: .75rem 1rem; display: flex; gap: 1rem; align-items: center; }
+header a { color: #fff; } header strong { margin-right: auto; }
+main { padding: 1rem; max-width: 50rem; }
+a { color: #2563eb; }
+table { border-collapse: collapse; width: 100%; } td { padding: .4rem; border-bottom: 1px solid #ddd; }
+tr.now-playing td { background: #fef3c7; font-weight: 600; }
+.single { background: #7c3aed; color: #fff; border-radius: 3px; padding: 0 .3rem; font-size: .75rem; margin-left: .3rem; }
+.player { position: fixed; bottom: 0; left: 0; right: 0; background: #111827; color: #fff; padding: .6rem 1rem; }
+.player a { color: #93c5fd; }
+.player .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.player input[type=range] { flex: 1; min-width: 8rem; }
+.player .diag { font: 12px ui-monospace, monospace; color: #9ca3af; margin-top: .4rem; }
+.badge { font: 12px ui-monospace, monospace; background: #dc2626; color: #fff; padding: .1rem .4rem; border-radius: 3px; }
+#blazor-error-ui { display: none; }
