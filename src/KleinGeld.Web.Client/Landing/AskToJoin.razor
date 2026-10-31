@@ -1,0 +1,64 @@
+@inject HttpClient Http
+
+@* The Join Request form on the landing page. Whatever email is entered, a sent request gets the same confirmation. *@
+<section class="ask-to-join" aria-labelledby="ask-to-join-heading">
+    <h2 id="ask-to-join-heading">Ask to join</h2>
+
+    @if (_sent)
+    {
+        <p role="status">Thanks for asking. The Admin will read your message and reply by email.</p>
+    }
+    else
+    {
+        <EditForm Model="_form" OnValidSubmit="SendAsync">
+            <DataAnnotationsValidator />
+
+            <label for="join-name">Name</label>
+            <InputText id="join-name" @bind-Value="_form.Name" autocomplete="name" maxlength="@JoinRequestForm.NameMaxLength" />
+            <ValidationMessage For="() => _form.Name" />
+
+            <label for="join-email">Email</label>
+            <InputText id="join-email" type="email" @bind-Value="_form.Email" autocomplete="email" maxlength="@JoinRequestForm.EmailMaxLength" />
+            <ValidationMessage For="() => _form.Email" />
+
+            <label for="join-message">Message</label>
+            <InputTextArea id="join-message" @bind-Value="_form.Message" rows="5" maxlength="@JoinRequestForm.MessageMaxLength"
+                           placeholder="Who are you, and who in the group do you know?" />
+            <ValidationMessage For="() => _form.Message" />
+
+            @if (_failed)
+            {
+                <p class="validation-message" role="alert">Your request couldn't be sent. Please try again.</p>
+            }
+
+            <button type="submit" disabled="@_sending">@(_sending ? "Sending…" : "Send Join Request")</button>
+        </EditForm>
+    }
+</section>
+
+@code {
+    private readonly JoinRequestForm _form = new();
+    private bool _sending;
+    private bool _sent;
+    private bool _failed;
+
+    private async Task SendAsync()
+    {
+        _sending = true;
+        _failed = false;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync("api/join-requests", _form);
+            _sent = response.IsSuccessStatusCode;
+            _failed = !_sent;
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _sending = false;
+        }
+    }
+}

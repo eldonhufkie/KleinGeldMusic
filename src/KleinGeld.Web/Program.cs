@@ -2,6 +2,7 @@ using KleinGeld.Data;
 using KleinGeld.Web;
 using KleinGeld.Web.Api;
 using KleinGeld.Web.Components;
+using KleinGeld.Web.Email;
 using KleinGeld.Web.Testing;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,8 +15,11 @@ builder.Services.AddHealthChecks()
     .AddCheck<DatabaseMigratedHealthCheck>("database-migrated");
 
 builder.AddMemberAuthentication();
+builder.AddEmailSender();
 
 builder.Services.AddProblemDetails();
+// Checks API request bodies against their DataAnnotations and answers 400 with the errors.
+builder.Services.AddValidation();
 builder.Services.AddRazorComponents()
     .AddInteractiveWebAssemblyComponents()
     // Sends the name and role claims to the client (enough for the Admin link), never the security stamp.
@@ -42,6 +46,7 @@ app.UseAntiforgery();
 
 app.MapDefaultEndpoints();
 app.MapTestingEndpoints();
+app.MapGroup("/api").MapJoinRequestEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapMemberEndpoints();
 
 app.MapStaticAssets();

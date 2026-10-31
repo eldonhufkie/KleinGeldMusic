@@ -51,6 +51,9 @@ public sealed class KleinGeldApp : IAsyncLifetime
 
     public Task<HttpClient> LoginAsAdminAsync() => LoginAsync(AdminEmail, AdminPassword);
 
+    /// <summary>The emails the app sent, as MailPit received them.</summary>
+    public MailPit CreateMailPit() => new(new HttpClient { BaseAddress = App.GetEndpoint("mailpit", "http") });
+
     /// <summary>Sets the time the web host's <see cref="TimeProvider"/> reports from now on.</summary>
     public async Task SetClockAsync(DateTimeOffset now)
     {
