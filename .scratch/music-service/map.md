@@ -1,7 +1,7 @@
 # Map: KleinGeld Music first version
 
 Label: wayfinder:map
-Spec: [KleinGeld Music first version](spec.md) (`ready-for-agent`)
+Spec: [#3 KleinGeld Music first version](https://github.com/eldonhufkie/KleinGeldMusic/issues/3) (`ready-for-agent`; tickets are its sub-issues #4–#51)
 
 ## Destination
 
