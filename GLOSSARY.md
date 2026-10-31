@@ -16,9 +16,21 @@ _Avoid_: Moderator, owner
 A request from someone outside the group to become a Member, which the Admin approves or rejects.
 _Avoid_: Sign-up, registration, invite
 
+**Leave**:
+A Member deleting themselves from KleinGeld Music, for good. The Admin can't Leave.
+_Avoid_: Delete account, unsubscribe, quit
+
+**Remove**:
+The Admin deleting a Member for good, with a reason told to that person.
+_Avoid_: Ban, kick, suspend, deactivate
+
 **Artist**:
-A public name music is published under, managed by one or more Members (a solo act or a band).
+A public name music is published under, managed by one or more Members (a solo act or a band). An Artist whose last managing Member Leaves or is Removed is deleted with them.
 _Avoid_: Band, creator, uploader, artist account
+
+**Stop managing**:
+A Member no longer managing an Artist, by their own choice or another managing Member's. The last managing Member can't Stop managing; they delete the Artist instead.
+_Avoid_: Leave (for an Artist), kick
 
 ## Music
 
