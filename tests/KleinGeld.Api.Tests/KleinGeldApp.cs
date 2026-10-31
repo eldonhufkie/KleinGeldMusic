@@ -22,6 +22,7 @@ public sealed class KleinGeldApp : IAsyncLifetime
         [
             $"Parameters:admin-email={AdminEmail}",
             $"Parameters:admin-password={AdminPassword}",
+            "Postgres:DataVolume=false",
         ]);
         builder.CreateResourceBuilder<ProjectResource>("web")
             .WithEnvironment("Testing__Enabled", "true");

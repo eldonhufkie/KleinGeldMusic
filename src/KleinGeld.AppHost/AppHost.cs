@@ -1,7 +1,15 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
-var database = builder.AddPostgres("postgres")
-    .AddDatabase("kleingeld");
+var postgres = builder.AddPostgres("postgres");
+
+// Keeps dev data between runs. The API tests turn it off so every test run starts from an empty database.
+var useDataVolume = !bool.TryParse(builder.Configuration["Postgres:DataVolume"], out var configured) || configured;
+if (useDataVolume)
+{
+    postgres.WithDataVolume();
+}
+
+var database = postgres.AddDatabase("kleingeld");
 
 var blobs = builder.AddAzureStorage("storage")
     .RunAsEmulator()
