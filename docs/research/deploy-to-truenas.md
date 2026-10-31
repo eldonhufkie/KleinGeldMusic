@@ -1,150 +1,236 @@
-# Deploying from Azure DevOps to a TrueNAS SCALE custom app
+# Deploying KleinGeld Music from Azure DevOps to a TrueNAS custom app
 
-Research for ticket `15-deploy-to-truenas-research`. Sources read on **2026-10-31**. The target box runs **TrueNAS SCALE 24.10.2.4 (ElectricEel)**. The app is published through Tailscale Funnel, and the router has no open ports. Prices exclude VAT.
+Research for [issue 15](../../.scratch/music-service/issues/15-deploy-to-truenas-research.md), which feeds the decision in [issue 16](../../.scratch/music-service/issues/16-choose-deployment.md). Everything was read on **2026-10-31**. Versions checked: TrueNAS 24.10.2.4 (installed), 25.04.2.x, 25.10.7, and 26-BETA.3; Aspire 13.6.4; EF Core 9+; Docker Engine 27.5 (TrueNAS 24.10/25.04) and 29.0.4 (TrueNAS 26).
 
-Every claim links to its source. Lines marked **(inference)** are conclusions drawn from the sources, not statements the sources make. Verify those on the box before relying on them.
+Claims come from primary sources: TrueNAS docs, the `truenas/middleware`, `truenas/api_client` and `truenas/apps` source, aspire.dev and the `microsoft/aspire` source, Microsoft Learn, and the GitHub, Docker and Tailscale docs. Where I drew a conclusion from source code rather than from a documented statement, it is marked **(inference)**. Claims with only a community source are marked **(community)**.
 
-## Answer
+## Short answer
 
-Every working route has two parts. The images go to a registry. Then something on the home side, or something that can reach it over Tailscale, tells TrueNAS to use the new tag. The facts that most limit the choice:
+**Front-runner:** a **Microsoft-hosted Azure Pipelines agent** does the build. It runs `aspire publish`, builds and pushes the images tagged with the build number to **Azure Container Registry Basic** (about $5/month), and renders the Compose file with the production secrets. It then joins the tailnet with an **ephemeral, tagged Tailscale auth key**, connects to TrueNAS **over SSH**, and runs the local TrueNAS CLI `midclt call -j app.update <app> {custom_compose_config_string: …}`.
 
-1. **24.10.2.4 cannot store private-registry credentials.** The *Docker Registries* screen and the `app.registry.*` API first appear in 25.04 ([25.04 Apps UI reference](https://www.truenas.com/docs/scale/25.04/scaleuireference/apps/), [API v25.04 `app.registry.create`](https://api.truenas.com/v25.04/api_methods_app.registry.create.html)). The 24.10.2.4 middleware has no registry plugin ([middleware tree at release/24.10.2.4](https://github.com/truenas/middleware/tree/release/24.10.2.4/src/middlewared/middlewared/plugins/apps)). On 24.10 a private image is pulled once, with credentials passed only to that pull (`app.image.pull` with `auth_config`) ([images.py @24.10.2.4](https://github.com/truenas/middleware/blob/release/24.10.2.4/src/middlewared/middlewared/plugins/apps_images/images.py)).
-2. **24.10 is archived.** The supported path is 24.10.2.4 → 25.04.2.6 → 25.10.7. Only 25.10 is recommended for General and Mission Critical users ([Software Status](https://www.truenas.com/docs/softwarestatus/)). Any route you design now goes through at least two major TrueNAS upgrades.
-3. **The Aspire output is not directly pasteable into "Install via YAML".** `aspire publish` writes `docker-compose.yaml` with `${VAR}` placeholders, plus a `.env` file ([aspire.dev: Docker Compose](https://aspire.dev/deployment/docker-compose/), [deploy first app](https://aspire.dev/get-started/deploy-first-app/)). TrueNAS's YAML editor has no `.env` support. Compose's `include:` with `env_file:` is the documented way around this, covered below.
-4. **Nothing has to listen on the internet.** A self-hosted agent only makes outbound long-poll HTTPS calls ([Azure Pipelines agents](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/agents?view=azure-devops)). A Microsoft-hosted agent can join the tailnet as an ephemeral, tagged node ([Tailscale OAuth clients](https://tailscale.com/kb/1215/oauth-clients)).
+TrueNAS stays in charge of the app. The update runs its own `docker compose up --force-recreate`, so the job fails visibly if the stack doesn't come up. EF Core migrations run as a **one-shot migration-bundle container** that the API waits for with `depends_on: service_completed_successfully`.
 
-| Route | Inbound exposure | Works on 24.10.2.4 with a private registry? | Moving parts | Survives TrueNAS upgrades |
+On **24.10**, TrueNAS has no stored registry credentials for Compose, so the pipeline pre-pulls the private images with `app.image.pull` and an `auth_config`. From **25.04** on, the registry is signed in once under *Apps → Docker Registries*.
+
+Costs:
+- ACR Basic: $0.1666/day, about $5.07/month, including 10 GB of storage.
+- GHCR: currently $0, the free alternative.
+- Azure Pipelines: the free tier covers it (1,800 Microsoft-hosted minutes a month, plus one self-hosted job).
+- Tailscale: one extra short-lived device.
+
+Main caveats:
+- **24.10 is end of life** and has no way to sign in to a registry. Upgrade to **25.10** before building the pipeline.
+- Secrets end up stored in plain text in the TrueNAS app config and in its snapshots.
+- Every deploy recreates *all* containers, PostgreSQL included, so there is a short outage.
+- The REST API is gone in TrueNAS 26, and `auth.login_with_api_key` is due to be removed in 27. Don't build on either.
+- Watchtower is archived and doesn't fit.
+
+---
+
+## 1. Container registry
+
+### Options and costs (read 2026-10-31)
+
+| Registry | Price | Private images | Auth that TrueNAS can use | Notes |
 |---|---|---|---|---|
-| A. Self-hosted agent on TrueNAS (container) | None, outbound only | Yes. The agent can `docker login` and pull itself, or call `app.image.pull` with `auth_config` | Agent container, PAT or service principal, Docker socket or `midclt` access | Medium: an app like any other; the docker.sock mount is root-equivalent |
-| B. Microsoft-hosted agent + Tailscale + SSH | Tailnet only (SSH on TrueNAS, ACL-restricted) | Yes, through `midclt call -job app.image.pull …` or `docker login` over SSH | OAuth client, tag, ACL, SSH key or Tailscale SSH, TrueNAS user | Good: SSH and `midclt` are stable; method names change between API versions |
-| C. TrueNAS JSON-RPC API (`app.pull_images`, `app.update`, `app.redeploy`) | Tailnet only (TrueNAS web UI port) | Partly: `app.pull_images` has no credential argument on 24.10 | API key, websocket client | Medium: REST deprecated in 25.04, removed in 26; the API is versioned |
-| D. Watchtower-style auto-pull | None | Yes, if it gets a `config.json` | One container, socket mount | Poor: Watchtower is archived (Dec 2025) and it changes containers behind TrueNAS's back |
-| E. Manual: UI "Pull Image" + edit YAML / Update | None | Yes (UI Pull Image has optional credentials) | Human | Good |
+| **Azure Container Registry, Basic** | **$0.1666/day (≈ $5.07/month)**, 10 GB included, extra storage $0.10/GB/month (West Europe, [Azure Retail Prices API](https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20%27Container%20Registry%27%20and%20armRegionName%20eq%20%27westeurope%27); the [ACR pricing page](https://azure.microsoft.com/en-us/pricing/details/container-registry/) lists tiers and included storage but rendered prices as "$-") | Yes | **Repository-scoped tokens** (token name plus password, can expire, available "in all the service tiers") used with plain `docker login` ([Microsoft Learn](https://learn.microsoft.com/en-us/azure/container-registry/container-registry-token-based-repository-permissions)) | "Standard networking fees apply to network egress" ([pricing page](https://azure.microsoft.com/en-us/pricing/details/container-registry/)). Azure gives "the first 100 GB/month of egressed data for free" ([bandwidth pricing](https://azure.microsoft.com/en-us/pricing/details/bandwidth/)). Standard tier is $0.6666/day. |
+| **GitHub Container Registry (ghcr.io)** | **$0 today**: "Container image storage and bandwidth for the Container registry is currently free", with at least one month's notice before any change ([GitHub billing docs](https://docs.github.com/en/billing/concepts/product-billing/github-packages)) | Yes, private by default ([GHCR docs](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)) | Only a **classic PAT** (`read:packages` / `write:packages`); fine-grained PATs aren't supported ([GHCR docs](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)) | The PAT belongs to a person and covers all of that person's packages. The code lives in Azure DevOps, so this adds a second identity provider. |
+| **Docker Hub** | Personal $0 (**1 private repo**); Pro $9/user/month annual or $11 monthly ([Docker pricing](https://www.docker.com/pricing/)) | Personal: 1 repo only | Username plus token | Pull limits: 100 per 6 h unauthenticated, 200 per 6 h Personal, unlimited on paid plans ([Docker Hub usage](https://docs.docker.com/docker-hub/usage/)). The pricing page says "100 pulls/hr" for Personal, which conflicts with the usage page. KleinGeld has at least 3–4 images (api, web, conversion job, migrations), so the free plan doesn't fit. |
+| **Registry on TrueNAS** (catalog app "Distribution" 3.1.2, [truenas/apps](https://github.com/truenas/apps/tree/master/ix-dev/community/distribution)) | $0 | Yes (`basic_auth_users`, certificate option in [questions.yaml](https://github.com/truenas/apps/blob/master/ix-dev/community/distribution/questions.yaml)) | htpasswd basic auth. TrueNAS only fixed "registries that use htpasswd authentication were not supported" for custom-app updates in **26-BETA.3** ([26 notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/)) | The Microsoft-hosted agent would have to *push* over the tailnet with TLS. Images live on the same box they protect, so there's no off-box copy. |
+| **No registry** (`docker save` → SSH → `docker load`) | $0 | n/a | n/a | Works because Compose's default `pull_policy` is `missing` ([Compose spec](https://docs.docker.com/reference/compose-file/services/)) and TrueNAS's update doesn't force a pull (see §2) **(inference)**. There's no image history off the box, and the full image goes over the tailnet every time. |
 
-| Registry | Cost at this scale | Private images | How TrueNAS 24.10 pulls it | Notes |
-|---|---|---|---|---|
-| Azure Container Registry, Basic | $0.1666/day ≈ **$5/month**, 10 GiB included, then $0.10/GB-month ([Retail Prices API](https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20%27Container%20Registry%27%20and%20armRegionName%20eq%20%27westeurope%27%20and%20priceType%20eq%20%27Consumption%27), [ACR SKUs](https://learn.microsoft.com/en-us/azure/container-registry/container-registry-skus)) | Yes; no anonymous pull on Basic | Pull-only repository-scoped token as username/password ([ACR SKUs](https://learn.microsoft.com/en-us/azure/container-registry/container-registry-skus)) | Same tenant as Blob Storage; native Azure Pipelines service connection |
-| GitHub Container Registry | **$0 today**: "Container image storage and bandwidth for the Container registry is currently free" ([GitHub Packages billing](https://docs.github.com/en/billing/concepts/product-billing/github-packages)) | Yes | PAT (`read:packages`) as password | Needs a GitHub account; GitHub promises one month's notice before billing changes |
-| Docker Hub | Personal $0 with **1 private repo**; Pro $9–11/user/month for unlimited ([Docker pricing](https://www.docker.com/pricing/)) | 1 repo on free | Access token as password | Aspire produces one image per project, so the free tier does not fit without packing every image into one repo as tags |
-| Registry on TrueNAS (`registry:3`, CNCF Distribution) | $0 plus disk | Yes | `localhost:<port>` pulls need no TLS (127.0.0.0/8 is insecure-by-default, [dockerd](https://docs.docker.com/reference/cli/dockerd/)) | Pushes from Azure need TLS ([Distribution: deploying](https://distribution.github.io/distribution/about/deploying/)). That means `tailscale cert` (90-day renewal is yours) ([Tailscale HTTPS](https://tailscale.com/kb/1153/enabling-https)), and the pusher must be on the tailnet |
+### How TrueNAS pulls from a private registry, by version
 
-## 1. What Aspire's Docker Compose publish produces
+- **24.10 (installed): there's no persistent registry login for apps.**
+  - The 24.10 middleware has no `app_registry` plugin ([plugins at TS-24.10.2.4](https://github.com/truenas/middleware/tree/TS-24.10.2.4/src/middlewared/middlewared/plugins)).
+  - Compose runs as plain `docker compose …` with no `--config` ([compose_utils.py @24.10.2.4](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/compose_utils.py)).
+  - The only authenticated path is the one-off **Pull Image** dialog / `app.image.pull`, which takes an `auth_config` with `username` and `password` ([images.py @24.10.2.4](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps_images/images.py); the [24.10 Apps screen docs](https://www.truenas.com/docs/scale/24.10/scaleuireference/apps/) list "Docker Registry Authentication … Only needed for private images" and no Docker Registries screen).
+  - The image-update check is anonymous in 24.10 ([client.py @24.10.2.4](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps_images/client.py)), so TrueNAS can't show "update available" for private images **(inference)**.
+  - Community reports say that custom apps on private registries only work after a manual pre-pull **(community)** ([forum](https://forums.truenas.com/t/n00b-questions-about-deploying-private-custom-apps/6108)).
+  - **Workable on 24.10:** pre-pull with `midclt call -j app.image.pull '{"image": "<acr>.azurecr.io/kleingeld/api:<build>", "auth_config": {...}}'`, then `app.update` with a compose file that names that tag. `compose up` only pulls missing images ([Compose `pull_policy` default](https://docs.docker.com/reference/compose-file/services/)) **(inference)**. Don't use `app.pull_images` here: it runs `compose pull --policy always` without credentials ([pull_images.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/pull_images.py), [compose_utils.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/compose_utils.py)).
+- **25.04 and later: "Sign-in to a Docker registry".**
+  - The *Docker Registries* screen ([25.04 Apps docs](https://www.truenas.com/docs/scale/25.04/scaleuireference/apps/)) and the `app.registry.create` API (name, username, password or access token, URI; [API v25.10](https://api.truenas.com/v25.10/api_methods_app.registry.create.html)) arrived with the commit "Allow logging in to different docker registries (#15346)", 2025-01-13 ([compose_utils history](https://github.com/truenas/middleware/commits/master/src/middlewared/middlewared/plugins/apps/compose_utils.py)).
+  - The stored credentials are written to `/etc/docker/config.json` ([etc_files/docker/config.json.py @25.04.0](https://github.com/truenas/middleware/blob/TS-25.04.0/src/middlewared/middlewared/etc_files/docker/config.json.py)), and every Compose call now runs `docker --config /etc/docker compose …` ([compose_utils.py @25.04.0](https://github.com/truenas/middleware/blob/TS-25.04.0/src/middlewared/middlewared/plugins/apps/compose_utils.py)).
+  - Caveat: 26-BETA.3 still lists the fix "Custom app updates failed when the image came from a registry that requires authentication" (NAS-141149, NAS-141553) ([26 notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/)). I couldn't confirm whether 25.10.x has this bug or got the fix. Test a private-image update on the version you run.
+  - 25.10 also added registry **mirrors** (NAS-136553), and in 25.10.7 a single unreachable registry no longer stops the update check for all apps (NAS-142192) ([25.10 notes](https://www.truenas.com/docs/scale/25.10/gettingstarted/versionnotes/)).
 
-- `builder.AddDockerComposeEnvironment("env")` makes every resource a Compose service ([aspire.dev: Docker Compose](https://aspire.dev/deployment/docker-compose/)).
-- `aspire publish` writes `aspire-output/docker-compose.yaml` and a `.env` that lists the expected parameters **unfilled**. It does not build images ([same page](https://aspire.dev/deployment/docker-compose/)).
-- `aspire do prepare-<env-resource> --environment Production` builds the images and writes `.env.Production` with values filled in ([same page](https://aspire.dev/deployment/docker-compose/)).
-- `aspire deploy` runs prepare and then `docker compose up -d --remove-orphans` against the local Docker ([same page](https://aspire.dev/deployment/docker-compose/)). The docs do not cover a remote host.
-- Project images are referenced by variable. Example generated output: `image: "${APISERVICE_IMAGE}"` in YAML, and `APISERVICE_IMAGE=apiservice:latest` and `APISERVICE_PORT=8080` in `.env.Production` ([deploy first app](https://aspire.dev/get-started/deploy-first-app/)).
-- **Pushing:** `AddContainerRegistry(...)` plus `WithContainerRegistry(...)` (experimental, `ASPIRECOMPUTE003`), then `aspire do push` after `docker login`. The endpoint and repository can be parameters (`REGISTRY_ENDPOINT`, `REGISTRY_REPOSITORY`). `WithRemoteImageName`, `WithRemoteImageTag` and `WithImagePushOptions` set the tag, for example from `APP_VERSION` ([same page](https://aspire.dev/deployment/docker-compose/)). The docs' CI example is GitHub Actions to GHCR. In Azure Pipelines it is the same shell commands.
-- **Parameters and secrets:** `AddParameter("x")` reads `Parameters:x`. In CI, set `Parameters__x` environment variables, which take the highest priority ([aspire.dev: Environments](https://aspire.dev/deployment/environments/)). `AsEnvironmentPlaceholder` keeps a parameter as a `${...}` placeholder in YAML and `.env`, and `ConfigureEnvFile` edits captured variables ([Docker Compose page](https://aspire.dev/deployment/docker-compose/)). The docs do not say whether secret parameters are masked. Assume `.env.Production` from prepare holds them **in plain text (inference)**, so treat it as a secret file and never commit it.
-- **Startup ordering in the generated YAML:** `WaitForCompletion` becomes `depends_on: condition: service_completed_successfully`. **Every other wait type, including `WaitFor`, becomes `service_started`.** The `service_healthy` mapping is commented out in the source ([DockerComposeServiceResource.cs](https://github.com/dotnet/aspire/blob/main/src/Aspire.Hosting.Docker/DockerComposeServiceResource.cs)). So `WaitFor(postgres)` does **not** wait for Postgres to accept connections under Compose. The API needs connection retries, or a migrator gate (section 3).
-- Useful hooks: `ConfigureComposeFile`, and `PublishAsDockerComposeService` (restart policy, labels, container name). Image pull policy maps to Compose `pull_policy` ([Docker Compose page](https://aspire.dev/deployment/docker-compose/)). `WithDashboard(enabled: false)` drops the Aspire dashboard service ([Docker integration](https://aspire.dev/integrations/compute/docker/)).
+**Registry conclusion:** pick **ACR Basic** if about $5/month is acceptable. You get a pull-only, repository-scoped, expiring token for TrueNAS, and a push credential the pipeline can hold as an Azure DevOps service connection. **GHCR** is the $0 option, at the cost of a broad, person-bound classic PAT. Docker Hub's free plan is too small, and a registry on TrueNAS adds TLS and push-over-tailnet work for little gain.
 
-### Fitting it into a TrueNAS custom app
-
-TrueNAS's *Install via YAML* screen has only a name and a "Custom Config" YAML box ([24.10 Install Custom App screens](https://www.truenas.com/docs/scale/24.10/scaleuireference/apps/installcustomappscreens/)). The file may start with `include:`, which the docs describe as a way to reference "an external Compose file that defines services" ([apps.truenas.com: custom apps](https://apps.truenas.com/managing-apps/installing-custom-apps/)). Compose's long-form `include` takes `path`, `project_directory` and `env_file`. The `env_file` "defines an environment file(s) to use to define default values when interpolating variables" ([Compose `include` reference](https://docs.docker.com/reference/compose-file/include/)). The pieces fit like this:
-
-```yaml
-# TrueNAS "Install via YAML" → Custom Config (whole file)
-include:
-  - path: /mnt/<pool>/apps/kleingeld/docker-compose.yaml
-    env_file: /mnt/<pool>/apps/kleingeld/.env.Production
-```
-
-A deploy then means three steps: write the new `docker-compose.yaml` and `.env.Production` (with new `*_IMAGE` tags) to the dataset, make sure the images are present locally, and ask TrueNAS to re-run compose. `app.update` re-runs `docker compose up --force-recreate --remove-orphans` unless the app is stopped ([crud.py @24.10.2.4](https://github.com/truenas/middleware/blob/release/24.10.2.4/src/middlewared/middlewared/plugins/apps/crud.py)), and so does `app.redeploy` ([app_scale.py @24.10.2.4](https://github.com/truenas/middleware/blob/release/24.10.2.4/src/middlewared/middlewared/plugins/apps/app_scale.py)). TrueNAS docs never mention `include` for 24.10 specifically. Docker Engine on 24.10 is 27.5.0 ([24.10 release notes](https://www.truenas.com/docs/scale/24.10/gettingstarted/scalereleasenotes/)), and that bundles a Compose v2 that supports `include` **(inference: test it once)**.
-
-Alternative: run `docker compose --env-file .env.Production config` in CI to render one fully interpolated YAML, and push that through `app.update` as `custom_compose_config_string` ([interpolation docs](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/), [API v25.10 `app.update`](https://api.truenas.com/v25.10/api_methods_app.update.html)). The secrets then sit inside the app config stored by TrueNAS and are visible in the Edit YAML screen **(inference)**.
-
-### How the secrets reach the containers
-
-Aspire passes connection strings and other parameters as environment variables in the generated compose (`ConnectionStrings__db`, `Parameters__...`-derived values). On TrueNAS they can come from:
-
-| Mechanism | Where the secret lives | Notes |
-|---|---|---|
-| `.env.Production` next to the included compose file (above) | ZFS dataset, file mode 600, owned by root | Simplest fit with Aspire's output. The pipeline writes it from Azure DevOps secret variables, or a variable group linked to Key Vault |
-| Fully rendered YAML via `app.update` | TrueNAS app config | One artifact, but secrets end up in the UI |
-| Hand-edited `.env` on the box, CI writes only image tags | Dataset | Secrets never leave home; CI changes only `*_IMAGE` values (for example via a second `env_file`; later files override earlier ones, [interpolation docs](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)) |
-
-For this app that covers the Postgres password and connection string, the Gmail app password, and the Azure Storage connection string or account key. The Azure Storage credential can't use managed identity off-Azure, so a SAS or account key in the env file is the practical choice **(inference)**.
+---
 
 ## 2. Ways to apply the update
 
-### A. Self-hosted Azure Pipelines agent on TrueNAS
+### What TrueNAS actually does (24.10.2.4 source)
 
-- Microsoft documents a Linux agent image driven by `AZP_URL`, `AZP_TOKEN` (or `AZP_CLIENTID`, `AZP_CLIENTSECRET` and `AZP_TENANTID` for a service principal), `AZP_POOL` and `AZP_AGENT_NAME`. The token needs **Agent Pools (read, manage)** ([agent in Docker](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/docker)).
-- The agent finds jobs through "an HTTP long poll", so it needs no inbound ports ([agents](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/agents?view=azure-devops)).
-- Cost: one self-hosted parallel job is free for private projects, with no time limit ([parallel jobs](https://learn.microsoft.com/en-us/azure/devops/pipelines/licensing/concurrent-jobs)).
-- To touch the host's Docker, you bind-mount `/var/run/docker.sock`. Microsoft warns: "Doing this has serious security implications. The code inside the container can now run as root on your Docker host" ([agent in Docker](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/docker)). Running the agent as a TrueNAS custom app works. A small VM on the box is the more isolated choice.
-- Build and push can stay on a Microsoft-hosted agent, with only a deploy stage on the home agent. Or the home agent can do everything (.NET 10 SDK and Aspire CLI in the image).
+- A custom app's Compose YAML is stored at `/mnt/.ix-apps/app_configs/<app>/versions/<v>/templates/rendered/docker-compose.yaml`, alongside a `user_config.yaml` ([ix_apps/path.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/ix_apps/path.py), [state_utils.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/docker/state_utils.py)). The Compose project is named `ix-<app>` ([apps/utils.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/utils.py)).
+- **`app.update <app> {custom_compose_config | custom_compose_config_string}`** validates only that the YAML parses ([custom_app_utils.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/custom_app_utils.py)). It saves the YAML and runs `compose down` followed by `compose up -d --force-recreate --remove-orphans`, and raises an error if Compose exits non-zero ([crud.py `update_internal`](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/crud.py), [compose_utils.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/compose_utils.py)).- **`app.redeploy <app>`** re-runs the same update with the stored config ([app_scale.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/app_scale.py)).
+- **`app.pull_images <app> {redeploy: true}`** runs `compose pull --policy always`, then redeploys ([pull_images.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/pull_images.py)). This is the right call for a moving tag (for example `:prod`) once a registry login exists (25.04 and later).
+- Consequence: **every deploy recreates every container, PostgreSQL included**. Data in volumes survives, but expect a short outage **(inference from `--force-recreate` plus the preceding `down`)**.
+- `midclt` ships with TrueNAS. Its `call -j` flag waits for a job to finish; TrueNAS's own docs use `midclt call -j app.update APP_NAME '{…}'` ([25.04 notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/)). The 24.10.2.4 client has `-j`, plus `-u <uri>` and `-K <api key>` for remote use ([api_client @release/24.10.2.4](https://github.com/truenas/api_client/blob/release/24.10.2.4/truenas_api_client/__init__.py)).
 
-### B. Microsoft-hosted agent joins the tailnet, then SSH
+### Route A: SSH from a Microsoft-hosted agent over Tailscale, then `midclt` (front-runner)
 
-- Tailscale documents a GitHub Action, but no Azure Pipelines task ([GitHub Action](https://tailscale.com/kb/1276/tailscale-github-action)). The generic mechanism is an **OAuth client** with the `auth_keys` scope and assigned tags, used directly as an auth key: `tailscale up --auth-key=${OAUTH_CLIENT_SECRET} --advertise-tags=tag:ci`. Options `ephemeral` (default `true`) and `preauthorized` can be appended URL-style ([OAuth clients](https://tailscale.com/kb/1215/oauth-clients)).
-- Ephemeral nodes are removed 30–60 minutes after last activity, or immediately on `tailscale logout`. End the job with `tailscale logout` ([ephemeral nodes](https://tailscale.com/kb/1111/ephemeral-nodes)).
-- SSH: Tailscale SSH allows tagged→tagged connections only with `accept`, because check mode isn't allowed from tagged sources ([Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh)). On TrueNAS, Tailscale normally runs as the community **Tailscale app** ([TrueNAS Tailscale app](https://apps.truenas.com/resources/deploy-tailscale/)). Tailscale SSH would then land inside that container, not on the host **(inference)**. The practical target is TrueNAS's own OpenSSH service on the tailnet address, with a key-only deploy user and an ACL that allows only `tag:ci` → TrueNAS:22 **(inference)**.
-- On the box: write the files, then `midclt call -job app.image.pull '{"image":"…","auth_config":{"username":"…","password":"…"}}'` and `midclt call -job app.redeploy <app>` (methods from the 24.10.2.4 source above). The 25.04 notes name `midclt` as the supported CLI client ([25.04 release notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/)).
-- Cost: on the Microsoft-hosted free tier, one job of up to 60 min, 1,800 min/month ([parallel jobs](https://learn.microsoft.com/en-us/azure/devops/pipelines/licensing/concurrent-jobs)). Tailscale Funnel and OAuth are available on all plans ([Funnel](https://tailscale.com/kb/1223/funnel)). Plan-level device limits weren't checked.
+- **Network:** Tailscale recommends ephemeral nodes for "CI/CD systems". Use an ephemeral, tagged auth key and run `tailscale logout` at the end of the job; inactive ephemeral nodes are otherwise removed after about 30–60 minutes ([Tailscale ephemeral nodes](https://tailscale.com/kb/1111/ephemeral-nodes)).
+  - Use ordinary `sshd` with a deploy key, not Tailscale SSH. A Tailscale SSH rule *from a tagged device* can't use check mode, and check mode needs an interactive re-login, which doesn't suit CI ([Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh)).
+  - The TrueNAS catalog Tailscale app has a `host_network` option ([questions.yaml](https://github.com/truenas/apps/blob/master/ix-dev/community/tailscale/questions.yaml)). With it on, the host's SSH is reachable on its tailnet address **(inference)**.
+- **Steps:**
+  1. Build and push images tagged `$(Build.BuildId)`.
+  2. Render the Compose file (see §3).
+  3. `ssh truenas 'midclt call -j app.image.pull …'` (24.10 only).
+  4. `ssh truenas 'midclt call -j app.update kleingeld -'`, with the YAML in the payload. Stdin payload (`-`) only exists in the 26 client ([api_client README](https://github.com/truenas/api_client)), so on 24.10/25.x pass it as an argument or `scp` a JSON file first.
+- **Pros:** TrueNAS stays the owner of the app (UI, logs, upgrades). The job fails if Compose fails. `midclt` always matches the installed TrueNAS version, so the route rides through the REST removal in 26 **(inference)**. Costs fit the free tiers.
+- **Cons:** you need an SSH user that can run `midclt` (an admin with sudo), and the deploy key is root-equivalent. Tailscale reaches into the home LAN, so restrict the tag with ACLs.
 
-### C. TrueNAS API
+### Route B: the TrueNAS API called remotely (JSON-RPC over WebSocket)
 
-- 25.04+ uses a versioned JSON-RPC 2.0 WebSocket API. REST was deprecated in 25.04 ([25.04 release notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/)), and "Full removal is planned for TrueNAS 26" ([25.10 version notes](https://www.truenas.com/docs/scale/25.10/gettingstarted/versionnotes/)). API keys are user-linked, must go over HTTPS (keys sent over plain HTTP are revoked), and allow-list legacy keys are revoked on upgrade ([25.04 release notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/)).
-- Relevant jobs: `app.pull_images(app_name, {redeploy: true})` pulls and redeploys ([v25.10](https://api.truenas.com/v25.10/api_methods_app.pull_images.html); also present in [24.10.2.4](https://github.com/truenas/middleware/blob/release/24.10.2.4/src/middlewared/middlewared/plugins/apps/pull_images.py)). `app.redeploy` stops, pulls the latest images and restarts ([v25.10](https://api.truenas.com/v25.10/api_methods_app.redeploy.html)). `app.update` accepts `custom_compose_config_string` ([v25.10](https://api.truenas.com/v25.10/api_methods_app.update.html)). All require `APPS_WRITE`.
-- On 24.10, `app.pull_images` runs plain `docker compose pull` with no credentials of its own ([compose_utils.py @24.10.2.4](https://github.com/truenas/middleware/blob/release/24.10.2.4/src/middlewared/middlewared/plugins/apps/compose_utils.py)). For a private registry, either pre-pull with `app.image.pull` and its `auth_config`, or rely on root's Docker credentials. From 25.04, compose runs with `docker --config /etc/docker` ([compose_utils.py @25.04.2.6](https://github.com/truenas/middleware/blob/release/25.04.2.6/src/middlewared/middlewared/plugins/apps/compose_utils.py)), which is presumably where the Docker Registries entries are written **(inference)**. So a `docker login` done by hand on 24.10 may silently stop applying after the upgrade.
-- The API is reachable only via the tailnet here, so route C still needs B's tailnet join. It saves the SSH user, but you write a WebSocket client.
+- **API history:**
+  - 24.10 only speaks the legacy WebSocket protocol.
+  - 25.04 introduced the versioned JSON-RPC 2.0 API at `/api/current` ([api_client README](https://github.com/truenas/api_client); [25.04 notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/)).
+  - REST was deprecated in 25.04 and **"is removed in TrueNAS 26… REST API endpoints do not function in 26 and later"** ([26 version notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/)). The 25.10 notes add a daily alert when REST is used ([25.10 notes](https://www.truenas.com/docs/scale/25.10/gettingstarted/versionnotes/)).
+- **Auth churn:**
+  - In 25.04, legacy API keys migrate to the admin user, but keys *created via the API with an allow-list* "are revoked upon upgrade". Keys sent over plain HTTP are automatically revoked ([25.04 notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/)).
+  - In 26, `auth.login_with_api_key` is deprecated and planned for removal in 27. Use `auth.login_ex` with `API_KEY_PLAIN` or SCRAM ([26 notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/)).
+- The method docs exist for `app.update`, `app.redeploy`, `app.pull_images` and `app.registry.create` in the [v25.04](https://api.truenas.com/v25.04/api_methods_app.update.html) and [v25.10](https://api.truenas.com/v25.10/api_methods_app.pull_images.html) API references.
+- **Verdict:** this route is functionally the same as Route A, but without SSH. In return it needs an HTTPS-reachable UI with a certificate the agent trusts (the Python client only gained `verify_ssl` in 25.10, per the [api_client README](https://github.com/truenas/api_client)), plus an API key that changes form across 24.10, 25.04 and 26/27. Worth considering after upgrading to 25.10 or later. Never use REST.
 
-### D. Watchtower-style auto-pull
+### Route C: a self-hosted Azure Pipelines agent on TrueNAS
 
-`containrrr/watchtower` was **archived on 2025-12-17**. Its README says "This project is no longer maintained" and does not recommend it for production ([GitHub](https://github.com/containrrr/watchtower)). It also recreates containers outside TrueNAS's middleware, so the app state TrueNAS shows can drift from what is running **(inference)**. A pull-based alternative inside TrueNAS: leave "Check for docker image updates" on ([24.10 Apps UI reference](https://www.truenas.com/docs/scale/24.10/scaleuireference/apps/)), use a moving tag, and click Update. Update detection for custom apps was broken in 24.10.0, with a fix targeted for 24.10.1 ([24.10 release notes](https://www.truenas.com/docs/scale/24.10/gettingstarted/scalereleasenotes/)). Moving tags also make migrations and rollback harder (section 3).
+- **Cost and networking:** the agent runs in a container from Microsoft's Dockerfile, configured with `AZP_URL`, `AZP_TOKEN` and `AZP_POOL`. Its PAT or service principal needs the *Agent Pools (read, manage)* scope ([Learn: agent in Docker](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/docker)). One self-hosted parallel job is free for private projects ([Learn: parallel jobs](https://learn.microsoft.com/en-us/azure/devops/pipelines/licensing/concurrent-jobs)). The agent only connects outward, so no Tailscale is needed.
+- **Running Docker from the agent:** you have to mount `/var/run/docker.sock`. Microsoft warns: "serious security implications… can now run as root on your Docker host" ([Learn](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/docker)). Calling `docker compose` directly would also bypass TrueNAS's app records (`ix-` projects) **(inference)**. The agent would still need to reach `midclt` or the API on the host (back to Route A or B, but over the LAN).
+- **Don't install the agent on the TrueNAS host OS.** "Updating TrueNAS using apt or any method other than the TrueNAS web interface can make the system inoperable", and manually installed Docker breaks Apps ([25.04 upgrade notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/)).
+- **A VM instead:** VMs have changed a lot. 25.04.0–.1 moved VMs to "Instances", 25.04.2 brought classic VMs back, and Instances-era legacy VMs "are removed in TrueNAS 26" with no migration tool ([26 notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/)).
+- **Verdict:** this removes Tailscale from CI, but adds a root-equivalent agent image to keep patched on the NAS. The build would still run on Microsoft-hosted agents. Second choice.
 
-### E. Manual
+### Route D: Watchtower-style auto-pull
 
-UI: **Apps → Configuration → Manage Container Images → Pull Image**, with optional registry username and password ([24.10 Apps UI reference](https://www.truenas.com/docs/scale/24.10/scaleuireference/apps/)). Then edit the app YAML or `.env` and save. This needs no CI-to-home connectivity at all, and it is a fine fallback for any route above.
+- **Watchtower is unmaintained:** `containrrr/watchtower` was **archived on 2025-12-17**, and its last release was v1.7.1 (2023-11-11) ([repo](https://github.com/containrrr/watchtower); [announcement](https://github.com/containrrr/watchtower/discussions/2135)). Its README says not to use it in commercial or production environments.
+- **It may not work on TrueNAS 26:** it defaults to Docker API **1.25** ([flags.go @v1.7.1](https://github.com/containrrr/watchtower/blob/v1.7.1/internal/flags/flags.go)). Docker Engine 29 "requires API version v1.44 or later" ([Docker 29 release notes](https://docs.docker.com/engine/release-notes/29/)), and TrueNAS 26 ships Docker 29.0.4 ([26 notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/)). Default Watchtower would fail there **(inference)**.
+- **It doesn't fit the app model:** it recreates containers one by one, outside Compose and outside TrueNAS's app records. That means no `depends_on` ordering, so migrations wouldn't run first **(inference)**.
+- **Verdict:** rejected.
 
-## 3. EF Core migrations during a deploy
+### Route E: manual "pull and redeploy"
 
-- EF Core's guidance: "For automated deployment, use a migration bundle". Run it "as a one-shot deployment job after the database is healthy". Don't make every replica migrate from its entrypoint, and "Configure the deployment platform not to restart the migration container after it exits successfully" ([Applying migrations](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying)). Bundles use EF 9+ migration locking. Keep the production connection out of the bundle and use a deployment identity with schema rights ([same page](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying)).
-- **Aspire's `AddEFMigrations`** (package `Aspire.Hosting.EntityFrameworkCore`): `RunDatabaseUpdateOnStart()` applies only to `aspire run` and "has no effect during aspire publish or deployment". `PublishAsMigrationBundle(publishContainer: true)` turns the migrations into a container that each environment deploys. For Compose, the docs add `.PublishAsDockerComposeService((_, s) => s.Restart = "no")` ([aspire.dev: EF Core migrations](https://aspire.dev/integrations/databases/efcore/migrations/)). The package is **prerelease only** (latest 13.6.4-preview, 2026-10-24) ([NuGet](https://www.nuget.org/packages/Aspire.Hosting.EntityFrameworkCore)).
-- **Migrator worker project** (older sample): a worker applies migrations and exits, and the API uses `WaitForCompletion(migrationService)` ([sample](https://aspire.dev/reference/samples/database-migrations/)). Under Compose that becomes `service_completed_successfully` ([source](https://github.com/dotnet/aspire/blob/main/src/Aspire.Hosting.Docker/DockerComposeServiceResource.cs)), so the API starts only after a successful migration. The migrator's own `WaitFor(db)` becomes only `service_started`, so the migrator must retry until Postgres accepts connections **(inference from the mapping)**.
-- **Runtime `MigrateAsync()` at API startup** is allowed with EF 9+ locking. It costs least-privilege and review ([Applying migrations](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying)). With one API container that cost is small.
-- In every route, the migrator is just another service in the same compose project. TrueNAS recreating the project (`up --force-recreate`) re-runs it, and bundles are idempotent ([Aspire EF migrations](https://aspire.dev/integrations/databases/efcore/migrations/)). Add `dotnet ef migrations has-pending-model-changes` to CI, because EF 9+ throws at migrate time when the model has unmigrated changes ([Applying migrations](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying)).
+- **Moving tag:** the pipeline pushes `:prod`, then the Admin clicks *Update* in TrueNAS. That runs `app.pull_images` with redeploy (see above). It needs a registry login, so 25.04 or later. On 24.10 the anonymous update check can't see private images **(inference)**.
+- **Pinned tags:** the pipeline publishes the rendered Compose file as an artifact, and the Admin pastes it into *Edit* on the custom app.
+- **Verdict:** a fine fallback and a fine first step. It's the same TrueNAS operations as Route A, just triggered by hand.
 
-## 4. What breaks on TrueNAS upgrades
+### Route F: `aspire deploy` against the TrueNAS Docker daemon (`DOCKER_HOST=ssh://…`)
 
-**24.04 → 24.10 (already behind this box).** Apps moved from Kubernetes to Docker. Migration covered catalog and UI-custom apps only, and data lives in a hidden dataset at `/mnt/.ix-apps`. Apps did not migrate from encrypted pools, nor when network settings depended on an app container ([24.10 release notes](https://www.truenas.com/docs/scale/24.10/gettingstarted/scalereleasenotes/)). Hand-installed Docker on 24.04 or earlier breaks 24.10+ apps (NAS-134660). Apps on 24.10.2.1 and earlier stopped getting updates after 2025-06-01 ([25.04 release notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/)).
+- `aspire deploy` runs `docker compose up -d --remove-orphans` itself ([aspire.dev](https://aspire.dev/deployment/docker-compose/)). The project name is `aspire-<env>-<sha8>` ([DockerComposeEnvironmentResource.cs @v13.6.4](https://github.com/microsoft/aspire/blob/v13.6.4/src/Aspire.Hosting.Docker/DockerComposeEnvironmentResource.cs)), and Docker CLI can target a remote daemon over SSH ([Docker docs](https://docs.docker.com/engine/security/protect-access/)).
+- **Problem:** the stack would not be a TrueNAS custom app (TrueNAS tracks `ix-` projects), which contradicts the [hosting decision](../../.scratch/music-service/issues/07-hosting-storage-database.md) **(inference)**.
+- **Verdict:** rejected.
 
-**24.10 → 25.04 (Fangtooth).**
-- The REST API is deprecated and JSON-RPC WebSocket is the replacement.
-- API keys become user-linked and HTTPS-only. Allow-list keys are revoked.
-- Docker Registries and `app.registry` arrive.
-- Compose switches to `--config /etc/docker` (source above).
-- Custom apps with TTY enabled don't show logs in the UI.
-- Built-in Netdata is removed.
-- Auxiliary parameters are recommended to be removed before upgrading. SSH auxiliary parameters "can prevent the SSH service from starting", which matters for route B.
-- Updating by any method other than the web UI "can make the system inoperable".
+### Comparison of deploy routes
 
-All from the [25.04 release notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/).
+| Route | TrueNAS still manages the app | Network path from CI | Works on 24.10 with private images | Upgrade exposure | Extra cost | Effort |
+|---|---|---|---|---|---|---|
+| **A. Microsoft-hosted agent → Tailscale → SSH → `midclt`** | Yes | Ephemeral tailnet node, outbound | Yes, with `app.image.pull` + `auth_config` | Low: `midclt` matches the OS; method names stable 24.10→25.10 | $0 (free tiers) | Medium |
+| B. Microsoft-hosted agent → Tailscale → JSON-RPC API | Yes | Tailnet, HTTPS to the UI | Yes (legacy WebSocket on 24.10) | **High**: legacy WebSocket → JSON-RPC (25.04), keys revoked/reshaped (25.04), REST gone (26), `login_with_api_key` gone (27) | $0 | Medium |
+| C. Self-hosted agent container/VM on TrueNAS | Only if it calls `midclt`/API | Outbound 443 only | Yes | Medium: docker.sock is root; VM churn (25.04, 26) | $0 (1 free self-hosted job) | Medium-high |
+| D. Watchtower | **No** | None (polls) | Needs creds on host | **High**: archived; API 1.25 vs Docker 29's 1.44 | $0 | Low, but wrong |
+| E. Manual Update / paste YAML | Yes | None | Paste: yes. *Update* button: 25.04+ | Low | $0 | Low per deploy, manual |
+| F. `aspire deploy` via `DOCKER_HOST=ssh` | **No** | Tailnet + SSH | Needs `docker login` on host | Medium | $0 | Low, but wrong |
 
-**25.04 → 25.10 (Goldeye).**
-- REST removal is planned for TrueNAS 26.
-- Automatic app migration when changing the apps pool, and registry mirrors, are added.
-- The Docker start timeout was raised after slow-HDD systems marked apps FAILED.
-- Apps on SMB/NFS storage can show "crashed" after boot.
-- Several app upgrade/validation bugs were fixed in 25.10.1.
-- NVIDIA moves to open drivers, dropping Pascal, Maxwell and Volta.
-- 25.10.6 fixes one unreachable registry stopping all update checks.
+---
 
-All from the [25.10 version notes](https://www.truenas.com/docs/scale/25.10/gettingstarted/versionnotes/).
+## 3. How the Aspire output fits, and how secrets get to the containers
 
-**Practical implications for this design (inference):**
-- Keep everything the deploy depends on in **your own dataset**: compose file, env files, Postgres data as host paths. Don't keep it in ix-volumes or in Docker named volumes (the custom-apps guide also recommends bind mounts to TrueNAS storage for production, [apps.truenas.com](https://apps.truenas.com/managing-apps/installing-custom-apps/)).
-- Treat API method names and auth as version-specific. Prefer `midclt` over SSH, or the documented UI paths.
-- Re-test the deploy after each major upgrade, especially registry auth (24.10's ad-hoc auth vs 25.04's Docker Registries).
+### What `aspire publish` produces (Aspire 13.6.4, released 2026-10-24 ([releases](https://github.com/microsoft/aspire/releases)))
 
-## Gaps and things to verify on the box
+- `aspire publish` writes `docker-compose.yaml` plus a `.env` file with "expected parameters (unfilled)". It doesn't build images ([aspire.dev Docker Compose](https://aspire.dev/deployment/docker-compose/)).
+- `--environment <name>` produces a filled `.env.<name>` file.
+- `aspire do push` builds and pushes images to a registry declared with `AddContainerRegistry` / `WithContainerRegistry`. That registry API is **experimental (ASPIRECOMPUTE003)** ([aspire.dev](https://aspire.dev/deployment/docker-compose/)).
+- From the source ([DockerComposeServiceExtensions.cs @v13.6.4](https://github.com/microsoft/aspire/blob/v13.6.4/src/Aspire.Hosting.Docker/DockerComposeServiceExtensions.cs), [DockerComposeServiceResourceExtensions.cs](https://github.com/microsoft/aspire/blob/v13.6.4/src/Aspire.Hosting.Docker/DockerComposeServiceResourceExtensions.cs)):
+  - Each `AddParameter` (secret or not) becomes a `${NAME}` placeholder in the YAML. The name is upper-cased with `-` turned into `_`.
+  - Connection strings are assembled inline from those placeholders.
+  - Each project image becomes `${<RESOURCE>_IMAGE}`, defaulting to `<resource>:latest`.
+- `WaitFor` becomes `depends_on: condition: service_started`, and `WaitForCompletion` becomes `service_completed_successfully`. `service_healthy` is commented out in the generator ([DockerComposeServiceResource.cs](https://github.com/microsoft/aspire/blob/v13.6.4/src/Aspire.Hosting.Docker/DockerComposeServiceResource.cs)).
+- An Aspire dashboard container is included by default (`DashboardEnabled = true`) ([DockerComposeEnvironmentResource.cs](https://github.com/microsoft/aspire/blob/v13.6.4/src/Aspire.Hosting.Docker/DockerComposeEnvironmentResource.cs)).
+- The 13.6.4 generator doesn't set a `restart:` policy, and Compose's default is `"no"` ([Compose spec](https://docs.docker.com/reference/compose-file/services/)). Add `restart: unless-stopped` to long-running services via `PublishAsDockerComposeService` **(inference; I didn't confirm whether TrueNAS restarts apps itself at boot)**.
 
-- `include:` + absolute `env_file:` under TrueNAS 24.10's custom-app validator: documented for TrueNAS generally, not tested on 24.10.
-- Whether secret Aspire parameters land in `.env.Production` in plain text. Run `aspire do prepare-…` once and inspect the output.
-- Whether a root `docker login` on 24.10 is honoured by `app.pull_images`, and whether it survives the 25.04 upgrade.
-- Tailscale plan limits for tagged or ephemeral devices; no Tailscale-provided Azure Pipelines task exists, so CI uses the install script plus `tailscale up`.
-- How the community TrueNAS Tailscale app is configured for Funnel and host networking. Its docs page doesn't say ([TrueNAS Tailscale app](https://apps.truenas.com/resources/deploy-tailscale/)). Funnel's ports are limited to 443, 8443 and 10000, and its bandwidth limits are non-configurable ([Funnel](https://tailscale.com/kb/1223/funnel)).
-- The 24.10 API reference on api.truenas.com lists events only. The 24.10 method behaviour above comes from the middleware source at tag `release/24.10.2.4`, not from docs.
+### The mismatch with TrueNAS custom apps
+
+- Compose fills `${…}` from the shell, from `--env-file`, or from a `.env` in the project directory, which is the directory of the first Compose file ([Docker interpolation docs](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)).
+- TrueNAS calls `docker compose -f <rendered file> -p ix-<app> …` with no `--env-file` ([compose_utils.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/compose_utils.py)), and the rendered directory is managed by TrueNAS. So **Aspire's `.env` isn't picked up** **(inference)**.
+
+### Three ways to get the secrets in
+
+1. **Render in the pipeline (works on 24.10, 25.x and 26).**
+   - Keep the secrets in an Azure DevOps secret variable group or Key Vault: Postgres password, Gmail app password, Azure storage connection string or key.
+   - Write `.env.Production`, then run `docker compose -f docker-compose.yaml --env-file .env.Production config`. This prints the fully interpolated file to send with `app.update` **(inference; standard Compose CLI behaviour)**.
+   - *Trade-off:* the secrets are then stored in plain text in `/mnt/.ix-apps/app_configs/kleingeld/…`, in every ZFS snapshot or replica of the ix-apps dataset (relevant to [backups](../../.scratch/music-service/issues/14-backups.md)), and in `app.config` output for anyone with the `APPS_READ` role ([crud.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/crud.py)). They also show in `docker inspect`.
+2. **Keep secrets on a TrueNAS dataset and use the `env_file:` service attribute.**
+   - A `secrets.env` file sets container variables directly ([Docker docs](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/)). The pipeline never sees the secrets.
+   - *Trade-off:* `env_file` doesn't feed `${}` interpolation, so Aspire's inline connection strings, such as `…Password=${POSTGRES_PASSWORD}`, must be replaced by whole values in the file. That means post-processing Aspire's output.
+3. **TrueNAS 26 and later: `include:` with its own `env_file`.**
+   - 26-BETA.1 added support for the `include:` key in custom apps (NAS-137498) ([26 notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/)). An include's `env_file` "define[s] default values when interpolating", and it defaults to `.env` next to the included file ([Compose include](https://docs.docker.com/reference/compose-file/include/)).
+   - So the custom app can be just `include: [{path: /mnt/<pool>/kleingeld/docker-compose.yaml}]`. The pipeline copies Aspire's unchanged `docker-compose.yaml`, with image tags in a non-secret `.env`, and the secrets live in a root-only `.env` on the dataset **(inference)**.
+   - This is the cleanest option, but 26 is still beta: 26-BETA.3 dated 2026-08-20 is the latest listed ([26 notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/)).
+
+**Suggested now:** option 1 with pinned image tags. Move to option 3 once on TrueNAS 26 stable.
+
+---
+
+## 4. EF Core migrations during a deploy
+
+- **Microsoft's guidance:**
+  - "For automated deployment, use a migration bundle." Run it "as a one-shot deployment job after the database is healthy", and don't make each app replica migrate from its entrypoint.
+  - EF Core 9 and later lock migrations, and `Migrate()` throws if the model has pending changes. Check for that in CI with `dotnet ef migrations has-pending-model-changes`.
+  - Give the deployment its own identity with schema rights ([EF Core: Applying migrations](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying), updated 2026-08).
+- **Aspire integration:** `Aspire.Hosting.EntityFrameworkCore` provides `api.AddEFMigrations("api-migrations")`. `PublishAsMigrationBundle(publishContainer: true)` turns the bundle into its own container image (linux-x64 by default).
+  - For Docker Compose, set `.PublishAsDockerComposeService((_, s) => s.Restart = "no")`, and give the migration resource both `.WithReference(db)` and `.WaitFor(db)`.
+  - `RunDatabaseUpdateOnStart` is local-only.
+  - The page doesn't say which Aspire version introduced this ([aspire.dev EF migrations](https://aspire.dev/integrations/databases/efcore/migrations/)).
+- **How this plays out on TrueNAS:**
+  - With `api.WaitForCompletion(migrations)`, the generated Compose file has `depends_on: migrations: condition: service_completed_successfully` (generator source above). TrueNAS's `compose up -d` therefore starts the API only after the bundle exits 0. A failed migration makes `compose up` fail, which fails `app.update` and so the pipeline step **(inference from Compose semantics plus [compose_utils.py](https://github.com/truenas/middleware/blob/TS-24.10.2.4/src/middlewared/middlewared/plugins/apps/compose_utils.py))**.
+  - Because of `--force-recreate`, the bundle runs on every deploy. That's harmless: bundles apply only missing migrations.
+- **Gap:** Aspire maps `WaitFor(db)` to `service_started`, not `service_healthy`, so the bundle can start before PostgreSQL accepts connections. Add a `pg_isready` healthcheck to the Postgres service and switch the migration's `depends_on` condition to `service_healthy` via `PublishAsDockerComposeService`, or have the bundle retry **(inference)**.
+- **Not recommended:** running `efbundle` from the pipeline against Postgres over the tailnet, because it exposes the database port. Runtime `Migrate()` at API startup is acceptable with EF 9's lock, but Microsoft prefers a separate step.
+
+---
+
+## 5. What breaks across TrueNAS upgrades
+
+| Version | Change | Effect on this deployment |
+|---|---|---|
+| **24.10 Electric Eel** (installed: 24.10.2.4, 2025-08-07) | Apps moved from Kubernetes (k3s) to Docker. Custom apps can be installed from a Compose YAML ([24.10 notes](https://www.truenas.com/docs/scale/24.10/gettingstarted/scalereleasenotes/)). Automatic k8s→Docker migration on upgrade from 24.04 had a deadline of 2025-06-01 ([25.04 notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/)). | Already on Docker, so nothing to migrate. **24.10 is marked EOL** in the official client README ([api_client](https://github.com/truenas/api_client)). No registry sign-in. |
+| **25.04 Fangtooth** (latest 25.04.2.6) | REST deprecated; JSON-RPC 2.0 over WebSocket introduced. User-linked API keys, with allow-list keys created via the API revoked on upgrade, and HTTP key use revoking the key. Per-app host-IP port binding. Docker Registries sign-in. Compose now runs with `--config /etc/docker` ([25.04 notes](https://www.truenas.com/docs/scale/25.04/gettingstarted/scalereleasenotes/); [compose_utils @25.04.0](https://github.com/truenas/middleware/blob/TS-25.04.0/src/middlewared/middlewared/plugins/apps/compose_utils.py)). | Any `docker login` done by hand as root on 24.10 is ignored after upgrade, so use the Docker Registries screen **(inference)**. Recreate API keys. VMs moved to "Instances" in .0–.1, and classic VMs returned in .2. |
+| **25.10 Goldeye** (25.10.0 on 2025-10-28; latest 25.10.7 on 2026-09-02, and the client lists 25.10.8) | Registry mirrors. Automatic app migration when changing the apps pool. **25.10.0.1:** fixed custom apps not upgrading alongside image updates (NAS-138534) and false validation errors. 25.10.1: REST usage alerts. 25.10.7: one failing registry no longer blocks all update checks ([25.10 notes](https://www.truenas.com/docs/scale/25.10/gettingstarted/versionnotes/)). | The best current stable target. |
+| **26** (beta: BETA.1 2026-04-07, BETA.2 2026-06-17, BETA.3 2026-08-20) | **REST removed.** `auth.login` and `auth.login_with_api_key` deprecated, removal planned in 27. `include:` in custom apps. Custom-app updates from authenticated (and htpasswd) registries fixed. Docker Engine **29.0.4** (minimum API 1.44). Legacy Instances VMs removed ([26 notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/); [26 deprecations](https://www.truenas.com/docs/scale/26/gettingstarted/deprecations/)). | Breaks REST scripts, old-style API-key logins (in 27), Watchtower defaults, and VM-hosted agents created under Instances. Makes Aspire's `.env` usable through `include:`. |
+| **27** (in development) | Middleware commits target 27.0.0-BETA.1, for example compose progress reporting and broken-app handling ([compose_utils history](https://github.com/truenas/middleware/commits/master/src/middlewared/middlewared/plugins/apps/compose_utils.py)). | Watch the `auth.login_with_api_key` removal. |
+
+**Upgrade path:** update to the latest maintenance release of your current major version, then move to the next major version. You can skip majors only with a fresh install plus a config restore ([26 notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/)). From 24.10.2.4 that means 25.04.2.6, then 25.10.x, then 26. Back up the TrueNAS config, and snapshot `ix-apps`, before each step.
+
+---
+
+## 6. Azure Pipelines costs (read 2026-10-31)
+
+- **Microsoft-hosted free tier** (private projects): one job, 60 minutes per run, **1,800 minutes a month**. You enable it by linking billing to an Azure subscription ([Learn](https://learn.microsoft.com/en-us/azure/devops/pipelines/licensing/concurrent-jobs)).
+- **Self-hosted:** one free parallel job with no time limit ([same page](https://learn.microsoft.com/en-us/azure/devops/pipelines/licensing/concurrent-jobs)).
+- A build, push and deploy for this app should take a few minutes, well inside the free tier **(estimate)**.
+
+---
+
+## Open risks
+
+1. **No registry login on 24.10.** Private images need a pre-pull with credentials on every deploy, or an upgrade to 25.04 or later. Upgrading to 25.10 first is the simpler path.
+2. **Authenticated-registry custom-app updates** were only fixed in 26-BETA.3 (NAS-141149, NAS-141553). It's unclear whether 25.10.x has this bug, so test a private-image `app.update` / `app.pull_images` on the target version before relying on it.
+3. **Secrets stored in plain text** in the ix-apps dataset and its snapshots or replicas (option 1). Decide whether off-site backups of that dataset need encryption.
+4. **Downtime on every deploy:** `--force-recreate` recreates PostgreSQL as well as the app containers.
+5. **Startup race between migrations and Postgres** unless a healthcheck plus `service_healthy` is added.
+6. **API churn:** REST is removed in 26, and `auth.login_with_api_key` is due for removal in 27. Keep to `midclt` over SSH, or to JSON-RPC with `auth.login_ex`.
+7. **Tailscale inside CI** gives the pipeline a route into the home LAN. Use a tagged ephemeral key and ACLs that only allow port 22 on the NAS.
+8. **The Aspire registry/push APIs are experimental (ASPIRECOMPUTE003)** and may change between 13.x releases. Pin the Aspire version in CI.
+9. **Azure egress:** ACR pulls and Blob streaming both count against Azure egress. The 100 GB/month free allowance is stated per customer on the bandwidth page; I didn't verify how it's shared across services.
+
+## Claims I couldn't verify
+
+- Whether **24.10 or 25.x** custom apps accept `include:` (it's only documented as added in 26-BETA.1).
+- Whether TrueNAS restarts custom-app containers at boot when the Compose file has no `restart:` policy.
+- Whether a root `docker login` on 24.10 makes `app.pull_images` work. The source suggests it would, since 24.10 calls plain `docker compose`, but I didn't test it.
+- Whether Watchtower works on Docker 29 with `DOCKER_API_VERSION=1.44`.
+- Which Aspire version introduced `AddEFMigrations` / `PublishAsMigrationBundle`.
+- Docker Hub's Personal pull limit: the pricing page says 100 pulls/hour, the usage docs say 200 per 6 hours.
+- TrueNAS 24.10's end-of-life status rests only on the `truenas/api_client` README.
+- That GHCR's "currently free" covers private pulls from outside GitHub Actions. The billing page says container storage and bandwidth are free, without that qualifier.
+- The ACR Basic price is the list price for West Europe. Other regions and currencies weren't checked, and the ACR pricing page didn't render prices.
