@@ -15,9 +15,10 @@ var blobs = builder.AddAzureStorage("storage")
     .RunAsEmulator()
     .AddBlobs("blobs");
 
-builder.AddContainer("mailpit", "axllent/mailpit")
+var mailpit = builder.AddContainer("mailpit", "axllent/mailpit")
     .WithHttpEndpoint(targetPort: 8025, name: "http")
     .WithEndpoint(targetPort: 1025, name: "smtp", scheme: "tcp");
+var mailpitSmtp = mailpit.GetEndpoint("smtp");
 
 // The one Admin, created by the migrator on its first run.
 var adminEmail = builder.AddParameter("admin-email");
@@ -32,7 +33,12 @@ var migrator = builder.AddProject<Projects.KleinGeld_Migrator>("migrator")
 builder.AddProject<Projects.KleinGeld_Web>("web")
     .WithReference(database)
     .WithReference(blobs)
+    // Every email goes to MailPit in development and tests.
+    .WithEnvironment(
+        "ConnectionStrings__smtp",
+        ReferenceExpression.Create($"Endpoint=smtp://{mailpitSmtp.Property(EndpointProperty.HostAndPort)}"))
     .WaitFor(blobs)
+    .WaitFor(mailpit)
     .WaitForCompletion(migrator)
     .WithHttpHealthCheck("/health")
     .WithExternalHttpEndpoints();
