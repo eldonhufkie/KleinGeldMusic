@@ -11,8 +11,14 @@ builder.AddContainer("mailpit", "axllent/mailpit")
     .WithHttpEndpoint(targetPort: 8025, name: "http")
     .WithEndpoint(targetPort: 1025, name: "smtp", scheme: "tcp");
 
+// The one Admin, created by the migrator on its first run.
+var adminEmail = builder.AddParameter("admin-email");
+var adminPassword = builder.AddParameter("admin-password", secret: true);
+
 var migrator = builder.AddProject<Projects.KleinGeld_Migrator>("migrator")
     .WithReference(database)
+    .WithEnvironment("Admin__Email", adminEmail)
+    .WithEnvironment("Admin__Password", adminPassword)
     .WaitFor(database);
 
 builder.AddProject<Projects.KleinGeld_Web>("web")

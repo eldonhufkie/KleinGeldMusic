@@ -9,23 +9,34 @@
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["KleinGeld.Web.styles.css"]" />
     <ImportMap />
-    <HeadOutlet @rendermode="RenderMode" />
+    <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 
 <body>
-    @* Shown until WebAssembly has loaded and the app shell renders; hidden by CSS in app.css. *@
-    <div id="app-loading" role="status" aria-label="Loading KleinGeld Music">
-        <div class="app-loading-logo">KleinGeld Music</div>
-        <div class="app-loading-bar"><div class="app-loading-progress"></div></div>
-        <div class="app-loading-text"></div>
-    </div>
-    <Routes @rendermode="RenderMode" />
+    @if (PageRenderMode is not null)
+    {
+        @* Shown until WebAssembly has loaded and the app shell renders; hidden by CSS in app.css. *@
+        <div id="app-loading" role="status" aria-label="Loading KleinGeld Music">
+            <div class="app-loading-logo">KleinGeld Music</div>
+            <div class="app-loading-bar"><div class="app-loading-progress"></div></div>
+            <div class="app-loading-text"></div>
+        </div>
+    }
+    <Routes @rendermode="PageRenderMode" />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="@Assets["Components/Account/Shared/PasskeySubmit.razor.js"]" type="module"></script>
 </body>
 
 </html>
 
 @code {
     // No prerendering: a prerendered page would show buttons that don't work until WebAssembly loads.
-    private static readonly IComponentRenderMode RenderMode = new InteractiveWebAssemblyRenderMode(prerender: false);
+    private static readonly IComponentRenderMode WebAssemblyWithoutPrerendering = new InteractiveWebAssemblyRenderMode(prerender: false);
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    // The Identity /Account pages are excluded from interactive routing and render statically on the server.
+    private IComponentRenderMode? PageRenderMode =>
+        HttpContext.AcceptsInteractiveRouting() ? WebAssemblyWithoutPrerendering : null;
 }
