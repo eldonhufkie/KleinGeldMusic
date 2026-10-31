@@ -17,7 +17,7 @@ A buildable spec for a web-only first version of KleinGeld Music: Members join t
 - Source code is moving from Azure DevOps (`origin`) to a public GitHub repository, with GitHub Actions for CI/CD (see the deployment decision). Tracker is local markdown in this folder.
 - [microsoft/dotnet-podcasts](https://github.com/microsoft/dotnet-podcasts) is reference material only: archived, and too complex to build on.
 - Grilling tickets: call the Skill tool for "grilling" and "domain-modeling".
-- Carry into the spec (setup chores, not decisions): provisioning the Azure storage account and its CORS rules for the `ts.net` address, Tailscale Funnel setup, a persistent volume for ASP.NET Core Data Protection keys, the dedicated Gmail account and its app password; moving the repository to GitHub with push protection; the Tailscale OAuth client, `tag:ci` ACL and the `deploy` user with its forced-command key; the `kleingeld` and `kleingeld-test` dataset folders and custom-app stubs.
+- Carry into the spec (setup chores, not decisions): provisioning the Azure storage account and its CORS rules for the `ts.net` address, Tailscale Funnel setup, a persistent volume for ASP.NET Core Data Protection keys, the dedicated Gmail account and its app password; moving the repository to GitHub with push protection; the Tailscale OAuth client, `tag:ci` ACL and the `deploy` user with its forced-command key; the `kleingeld` and `kleingeld-test` dataset folders and custom-app stubs; the backup snapshot tasks, `pg_dump` cron job, Cloud Sync tasks, backup storage account and TrueNAS alerts (see the backups decision).
 
 ### Decisions made while charting
 
@@ -49,6 +49,7 @@ A buildable spec for a web-only first version of KleinGeld Music: Members join t
 - [Choose how new versions are deployed](issues/16-choose-deployment.md): TrueNAS 25.10; custom app is an `include:` stub with hand-written `secrets.env`; migrator worker plus `pg_isready` healthcheck; public GitHub repo, Actions, public GHCR images; runner joins Tailscale and SSHes to a forced-command `deploy.sh`; merge to `main` deploys to a tailnet-only Test, a "Live" approval deploys the same tag to Production.
 - [When a Member leaves or is removed](issues/12-member-leaves.md): Leave and Remove are permanent deletion of all personal data; an Artist goes with its last managing Member; managers add each other directly, all equal; Remove needs a reason (email 10); sessions cut off at once; no rejoin blocklist; the Admin can't Leave.
 - [Browsing, navigation and search](issues/13-browsing-and-search.md): sidebar (bottom tab bar on phones); home shows New Releases and Playlists; only Published shown, others "not found"; Release type chips and Artist page sections; My Artists pages; Load more paging; search over names and titles with `pg_trgm` + `unaccent`; GUID v7 ids with slugs in URLs (ADR 0002).
+- [Backups for the database and audio](issues/14-backups.md): at most 1 h loss, same-evening restore, 30-day retention everywhere; hourly/daily ZFS snapshots; hourly encrypted `pg_dump` to an immutable Azure account in another region; blob soft delete, write-once blob names, hourly Cloud Sync of audio home; restore rehearsed once before launch.
 
 ## Not yet specified
 
