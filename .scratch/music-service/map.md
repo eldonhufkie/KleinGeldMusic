@@ -48,10 +48,11 @@ A buildable spec for a web-only first version of KleinGeld Music: Members join t
 - [Deploying to a TrueNAS custom app from Azure DevOps](issues/15-deploy-to-truenas-research.md): 24.10 is archived and can't store registry credentials (25.04+ can); routes are a self-hosted agent, or a hosted agent joining the tailnet then SSH/`midclt`; Aspire's `.env` compose output needs an `include:` wrapper; migrations via bundle, migrator worker, or `MigrateAsync()`.
 - [Choose how new versions are deployed](issues/16-choose-deployment.md): TrueNAS 25.10; custom app is an `include:` stub with hand-written `secrets.env`; migrator worker plus `pg_isready` healthcheck; public GitHub repo, Actions, public GHCR images; runner joins Tailscale and SSHes to a forced-command `deploy.sh`; merge to `main` deploys to a tailnet-only Test, a "Live" approval deploys the same tag to Production.
 - [When a Member leaves or is removed](issues/12-member-leaves.md): Leave and Remove are permanent deletion of all personal data; an Artist goes with its last managing Member; managers add each other directly, all equal; Remove needs a reason (email 10); sessions cut off at once; no rejoin blocklist; the Admin can't Leave.
+- [Browsing, navigation and search](issues/13-browsing-and-search.md): sidebar (bottom tab bar on phones); home shows New Releases and Playlists; only Published shown, others "not found"; Release type chips and Artist page sections; My Artists pages; Load more paging; search over names and titles with `pg_trgm` + `unaccent`; GUID v7 ids with slugs in URLs (ADR 0002).
 
 ## Not yet specified
 
-<!-- all earlier fog graduated into tickets on 2026-10-31 -->
+<!-- all earlier fog graduated into tickets on 2026-10-31; Playlist editing graduated into its own ticket the same day -->
 
 ## Out of scope
 
@@ -63,5 +64,6 @@ A buildable spec for a web-only first version of KleinGeld Music: Members join t
 - A licensed commercial catalog.
 - Public sign-up without Admin approval.
 - Handing the Admin role to another Member (a manual database change if ever needed); decided in [When a Member leaves or is removed](issues/12-member-leaves.md).
+- An Artist photo and bio (Artist cards use the newest Release's cover); an easy addition after launch. Decided in [Browsing, navigation and search](issues/13-browsing-and-search.md).
 - Buying a custom domain (planned after a working first version; then Resend email and a nicer address than `ts.net`).
 - A portfolio showcase site (e.g. on Vercel). Hosting the front end on Vercel would break the same-origin login cookie the audio stream relies on; decided in [Choose how new versions are deployed](issues/16-choose-deployment.md).
