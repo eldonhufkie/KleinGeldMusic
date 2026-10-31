@@ -31,3 +31,6 @@ Decided by Eldon Hufkie on 2026-10-31 in a grilling session.
 - **Multiple tabs or devices**: each plays on its own, with no coordination.
 - **Glossary**: added **Queue**.
 - No ADR: all of this is cheap to change later.
+
+
+**Amended 2026-10-31** (streaming reconciliation, see the [spec](../spec.md)): play links are ~10-minute SAS links signed against a stored access policy that the API rotates whenever access is taken away, so loss of access applies within about 30 seconds; the player fetches a fresh link when playback fails.
