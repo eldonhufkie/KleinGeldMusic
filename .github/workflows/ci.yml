@@ -1,0 +1,41 @@
+name: CI
+
+# Builds and tests every push and pull request. Never deploys.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install the Aspire CLI bundle
+        run: dotnet dnx --yes aspire.cli@13.6.3 -- setup --install-path "$HOME/.aspire"
+
+      # The API tests call the web host over HTTPS; on Linux, .NET only sees the trusted
+      # dev certificate when SSL_CERT_DIR includes its folder.
+      - name: Trust the HTTPS development certificate
+        # Exit code 4 means only some certificate stores (e.g. browsers' NSS) took it; .NET's OpenSSL one is what matters.
+        run: |
+          export SSL_CERT_DIR="$HOME/.aspnet/dev-certs/trust:/usr/lib/ssl/certs"
+          echo "SSL_CERT_DIR=$SSL_CERT_DIR" >> "$GITHUB_ENV"
+          dotnet dev-certs https --trust || [ $? -eq 4 ]
+
+      - name: Build
+        run: dotnet build KleinGeldMusic.slnx
+
+      - name: Test
+        run: dotnet test KleinGeldMusic.slnx --no-build

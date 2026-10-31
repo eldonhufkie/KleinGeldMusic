@@ -1,2 +1,14 @@
 <Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KleinGeld.AppHost/KleinGeld.AppHost.csproj" />
+    <Project Path="src/KleinGeld.Data/KleinGeld.Data.csproj" />
+    <Project Path="src/KleinGeld.Migrator/KleinGeld.Migrator.csproj" />
+    <Project Path="src/KleinGeld.ServiceDefaults/KleinGeld.ServiceDefaults.csproj" />
+    <Project Path="src/KleinGeld.Web.Client/KleinGeld.Web.Client.csproj" />
+    <Project Path="src/KleinGeld.Web/KleinGeld.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/KleinGeld.Api.Tests/KleinGeld.Api.Tests.csproj" />
+    <Project Path="tests/KleinGeld.Web.Client.Tests/KleinGeld.Web.Client.Tests.csproj" />
+  </Folder>
 </Solution>
