@@ -53,9 +53,14 @@ public sealed class LoginTests(KleinGeldApp app)
     [Fact]
     public async Task A_changed_security_stamp_refuses_the_next_request()
     {
+        // Identity re-checks the stamp only once time has passed since the cookie was issued, which a clock that
+        // another test froze never does on its own.
+        var loggedInAt = new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        await app.SetClockAsync(loggedInAt);
         using var client = await app.LoginAsAdminAsync();
 
         await app.ChangeSecurityStampAsync(KleinGeldApp.AdminEmail);
+        await app.SetClockAsync(loggedInAt.AddSeconds(1));
         using var response = await client.GetAsync("/api/me");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
