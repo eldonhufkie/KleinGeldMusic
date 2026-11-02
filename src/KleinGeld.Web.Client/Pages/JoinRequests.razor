@@ -40,21 +40,21 @@ else
                 {
                     <p>Reject @joinRequest.Name? They'll get a short email with no reason.</p>
                     <div class="join-request-actions">
-                        <button type="button" disabled="@(_busy is not null)" @onclick="() => RejectAsync(joinRequest)">
-                            @(_busy == joinRequest.Id ? "Rejecting…" : "Reject")
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => DecideAsync(joinRequest, Decision.Reject)">
+                            @(_deciding == (joinRequest.Id, Decision.Reject) ? "Rejecting…" : "Reject")
                         </button>
-                        <button type="button" disabled="@(_busy is not null)" @onclick="() => _confirmingReject = null">Cancel</button>
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => _confirmingReject = null">Cancel</button>
                     </div>
                 }
                 else
                 {
                     <div class="join-request-actions">
-                        <button type="button" disabled="@(_busy is not null)" @onclick="() => ApproveAsync(joinRequest)">
-                            @(_busy == joinRequest.Id && !_rejecting ? "Approving…" : "Approve")
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => DecideAsync(joinRequest, Decision.Approve)">
+                            @(_deciding == (joinRequest.Id, Decision.Approve) ? "Approving…" : "Approve")
                         </button>
                         @* Flagged requests are usually noise, so they reject in one click; others ask first. *@
-                        <button type="button" disabled="@(_busy is not null)" @onclick="() => RejectOrConfirmAsync(joinRequest)">
-                            @(_busy == joinRequest.Id && _rejecting ? "Rejecting…" : "Reject")
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => RejectOrConfirmAsync(joinRequest)">
+                            @(_deciding == (joinRequest.Id, Decision.Reject) ? "Rejecting…" : "Reject")
                         </button>
                     </div>
                 }
@@ -65,8 +65,10 @@ else
 
 @code {
     private List<OpenJoinRequest>? _open;
-    private Guid? _busy;
-    private bool _rejecting;
+    private enum Decision { Approve, Reject }
+
+    /// <summary>The Join Request whose decision is on its way to the API, which disables every button.</summary>
+    private (Guid Id, Decision Decision)? _deciding;
     private Guid? _confirmingReject;
     private bool _failed;
 
@@ -82,15 +84,11 @@ else
         }
     }
 
-    private Task ApproveAsync(OpenJoinRequest joinRequest) => DecideAsync(joinRequest, "approve");
-
-    private Task RejectAsync(OpenJoinRequest joinRequest) => DecideAsync(joinRequest, "reject");
-
     private async Task RejectOrConfirmAsync(OpenJoinRequest joinRequest)
     {
         if (joinRequest.EmailBelongsToMember || joinRequest.DuplicateOfOpenRequest)
         {
-            await RejectAsync(joinRequest);
+            await DecideAsync(joinRequest, Decision.Reject);
         }
         else
         {
@@ -98,14 +96,14 @@ else
         }
     }
 
-    private async Task DecideAsync(OpenJoinRequest joinRequest, string decision)
+    private async Task DecideAsync(OpenJoinRequest joinRequest, Decision decision)
     {
-        _busy = joinRequest.Id;
-        _rejecting = decision == "reject";
+        _deciding = (joinRequest.Id, decision);
         _failed = false;
+        var action = decision == Decision.Approve ? "approve" : "reject";
         try
         {
-            using var response = await Http.PostAsync($"api/admin/join-requests/{joinRequest.Id}/{decision}", null);
+            using var response = await Http.PostAsync($"api/admin/join-requests/{joinRequest.Id}/{action}", null);
             if (response.IsSuccessStatusCode)
             {
                 _open!.Remove(joinRequest);
@@ -121,7 +119,7 @@ else
         }
         finally
         {
-            _busy = null;
+            _deciding = null;
             _confirmingReject = null;
         }
     }
