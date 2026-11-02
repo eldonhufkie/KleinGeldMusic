@@ -36,9 +36,28 @@ else
                     <p><strong>There was already an open Join Request from this email.</strong></p>
                 }
                 <p class="join-request-message">@joinRequest.Message</p>
-                <button type="button" disabled="@(_approving is not null)" @onclick="() => ApproveAsync(joinRequest)">
-                    @(_approving == joinRequest.Id ? "Approving…" : "Approve")
-                </button>
+                @if (_confirmingReject == joinRequest.Id)
+                {
+                    <p>Reject @joinRequest.Name? They'll get a short email with no reason.</p>
+                    <div class="join-request-actions">
+                        <button type="button" disabled="@(_busy is not null)" @onclick="() => RejectAsync(joinRequest)">
+                            @(_busy == joinRequest.Id ? "Rejecting…" : "Reject")
+                        </button>
+                        <button type="button" disabled="@(_busy is not null)" @onclick="() => _confirmingReject = null">Cancel</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="join-request-actions">
+                        <button type="button" disabled="@(_busy is not null)" @onclick="() => ApproveAsync(joinRequest)">
+                            @(_busy == joinRequest.Id && !_rejecting ? "Approving…" : "Approve")
+                        </button>
+                        @* Flagged requests are usually noise, so they reject in one click; others ask first. *@
+                        <button type="button" disabled="@(_busy is not null)" @onclick="() => RejectOrConfirmAsync(joinRequest)">
+                            @(_busy == joinRequest.Id && _rejecting ? "Rejecting…" : "Reject")
+                        </button>
+                    </div>
+                }
             </li>
         }
     </ul>
@@ -46,7 +65,9 @@ else
 
 @code {
     private List<OpenJoinRequest>? _open;
-    private Guid? _approving;
+    private Guid? _busy;
+    private bool _rejecting;
+    private Guid? _confirmingReject;
     private bool _failed;
 
     protected override async Task OnInitializedAsync()
@@ -61,13 +82,30 @@ else
         }
     }
 
-    private async Task ApproveAsync(OpenJoinRequest joinRequest)
+    private Task ApproveAsync(OpenJoinRequest joinRequest) => DecideAsync(joinRequest, "approve");
+
+    private Task RejectAsync(OpenJoinRequest joinRequest) => DecideAsync(joinRequest, "reject");
+
+    private async Task RejectOrConfirmAsync(OpenJoinRequest joinRequest)
     {
-        _approving = joinRequest.Id;
+        if (joinRequest.EmailBelongsToMember || joinRequest.DuplicateOfOpenRequest)
+        {
+            await RejectAsync(joinRequest);
+        }
+        else
+        {
+            _confirmingReject = joinRequest.Id;
+        }
+    }
+
+    private async Task DecideAsync(OpenJoinRequest joinRequest, string decision)
+    {
+        _busy = joinRequest.Id;
+        _rejecting = decision == "reject";
         _failed = false;
         try
         {
-            using var response = await Http.PostAsync($"api/admin/join-requests/{joinRequest.Id}/approve", null);
+            using var response = await Http.PostAsync($"api/admin/join-requests/{joinRequest.Id}/{decision}", null);
             if (response.IsSuccessStatusCode)
             {
                 _open!.Remove(joinRequest);
@@ -83,7 +121,8 @@ else
         }
         finally
         {
-            _approving = null;
+            _busy = null;
+            _confirmingReject = null;
         }
     }
 }
