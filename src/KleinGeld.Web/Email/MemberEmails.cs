@@ -19,4 +19,16 @@ internal static class MemberEmails
             "The link works for 15 minutes. If it has expired, use \"Forgot your password?\" on the Login page,",
             "or ask the Admin to send this email again.",
         ]));
+
+    /// <summary>Email 2: the Join Request was rejected. Short and polite, and never with a reason.</summary>
+    public static OutgoingEmail Rejected(MailboxAddress person, string name) =>
+        new(person, "Your Join Request to KleinGeld Music", string.Join(Environment.NewLine,
+        [
+            $"Hi {name},",
+            "",
+            "Thank you for asking to join KleinGeld Music. Unfortunately the Admin couldn't accept your Join Request.",
+            "",
+            "Kind regards,",
+            "KleinGeld Music",
+        ]));
 }

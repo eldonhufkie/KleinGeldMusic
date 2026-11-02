@@ -56,5 +56,21 @@ internal static class AdminJoinRequestEndpoints
 
             return Results.NoContent();
         });
+
+        // Sends email 2 whatever the flags say: the Admin never gives a reason, so nothing in it reveals one.
+        api.MapPost("/join-requests/{id:guid}/reject", async (Guid id, KleinGeldDbContext db, EmailSender emails) =>
+        {
+            var joinRequest = await db.JoinRequests.SingleOrDefaultAsync(r => r.Id == id && r.Status == JoinRequestStatus.Open);
+            if (joinRequest is null)
+            {
+                return Results.NotFound();
+            }
+
+            joinRequest.Status = JoinRequestStatus.Rejected;
+            await db.SaveChangesAsync();
+            await emails.SendAsync(MemberEmails.Rejected(new MailboxAddress(joinRequest.Name, joinRequest.Email), joinRequest.Name));
+
+            return Results.NoContent();
+        });
     }
 }

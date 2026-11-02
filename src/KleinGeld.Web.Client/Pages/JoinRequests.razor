@@ -36,9 +36,28 @@ else
                     <p><strong>There was already an open Join Request from this email.</strong></p>
                 }
                 <p class="join-request-message">@joinRequest.Message</p>
-                <button type="button" disabled="@(_approving is not null)" @onclick="() => ApproveAsync(joinRequest)">
-                    @(_approving == joinRequest.Id ? "Approving…" : "Approve")
-                </button>
+                @if (_confirmingReject == joinRequest.Id)
+                {
+                    <p>Reject @joinRequest.Name? They'll get a short email with no reason.</p>
+                    <div class="join-request-actions">
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => DecideAsync(joinRequest, Decision.Reject)">
+                            @(_deciding == (joinRequest.Id, Decision.Reject) ? "Rejecting…" : "Reject")
+                        </button>
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => _confirmingReject = null">Cancel</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="join-request-actions">
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => DecideAsync(joinRequest, Decision.Approve)">
+                            @(_deciding == (joinRequest.Id, Decision.Approve) ? "Approving…" : "Approve")
+                        </button>
+                        @* Flagged requests are usually noise, so they reject in one click; others ask first. *@
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => RejectOrConfirmAsync(joinRequest)">
+                            @(_deciding == (joinRequest.Id, Decision.Reject) ? "Rejecting…" : "Reject")
+                        </button>
+                    </div>
+                }
             </li>
         }
     </ul>
@@ -46,7 +65,11 @@ else
 
 @code {
     private List<OpenJoinRequest>? _open;
-    private Guid? _approving;
+    private enum Decision { Approve, Reject }
+
+    /// <summary>The Join Request whose decision is on its way to the API, which disables every button.</summary>
+    private (Guid Id, Decision Decision)? _deciding;
+    private Guid? _confirmingReject;
     private bool _failed;
 
     protected override async Task OnInitializedAsync()
@@ -61,13 +84,26 @@ else
         }
     }
 
-    private async Task ApproveAsync(OpenJoinRequest joinRequest)
+    private async Task RejectOrConfirmAsync(OpenJoinRequest joinRequest)
     {
-        _approving = joinRequest.Id;
+        if (joinRequest.EmailBelongsToMember || joinRequest.DuplicateOfOpenRequest)
+        {
+            await DecideAsync(joinRequest, Decision.Reject);
+        }
+        else
+        {
+            _confirmingReject = joinRequest.Id;
+        }
+    }
+
+    private async Task DecideAsync(OpenJoinRequest joinRequest, Decision decision)
+    {
+        _deciding = (joinRequest.Id, decision);
         _failed = false;
+        var action = decision == Decision.Approve ? "approve" : "reject";
         try
         {
-            using var response = await Http.PostAsync($"api/admin/join-requests/{joinRequest.Id}/approve", null);
+            using var response = await Http.PostAsync($"api/admin/join-requests/{joinRequest.Id}/{action}", null);
             if (response.IsSuccessStatusCode)
             {
                 _open!.Remove(joinRequest);
@@ -83,7 +119,8 @@ else
         }
         finally
         {
-            _approving = null;
+            _deciding = null;
+            _confirmingReject = null;
         }
     }
 }

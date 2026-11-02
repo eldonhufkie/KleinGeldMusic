@@ -164,6 +164,12 @@ body:has(.app-shell) #app-loading {
     white-space: pre-line;
 }
 
+.join-request-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
 .join-requests button {
     font: inherit;
     padding: 0.375rem 1rem;
