@@ -90,6 +90,30 @@ public sealed class PasswordLinkTests(KleinGeldApp app)
     }
 
     [Fact]
+    public async Task After_email_1_expires_the_resent_link_works_and_the_old_one_still_doesnt()
+    {
+        var approvedAt = new DateTimeOffset(2034, 6, 7, 12, 0, 0, TimeSpan.Zero);
+        await app.SetClockAsync(approvedAt);
+        var email = await CreateMemberAsync();
+        var expired = await ReadLinkAsync(email, "Welcome to KleinGeld Music");
+        using var admin = await app.LoginAsAdminAsync();
+        var waiting = await FindWaitingAsync(admin, email);
+
+        await app.SetClockAsync(approvedAt.AddMinutes(16));
+        using var response = await admin.PostAsync($"/api/admin/members/{waiting.Id}/resend-setup-email", null);
+        var emails = await app.CreateMailPit().WaitForEmailsAsync(email, "Welcome to KleinGeld Music", count: 2);
+        var resent = new Uri(Regex.Match(emails[0].Text, @"https://\S+").Value);
+        using var browser = app.CreateWebClient();
+        var expiredPage = await browser.GetStringAsync(expired.PathAndQuery);
+        await SetPasswordAsync(resent, "First-Pa55word!");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains("This link has expired", expiredPage);
+        using var member = await app.LoginAsync(email, "First-Pa55word!");
+        Assert.Equal(new MeResponse(email, IsAdmin: false), await member.GetFromJsonAsync<MeResponse>("/api/me"));
+    }
+
+    [Fact]
     public async Task A_Member_who_has_set_a_password_is_no_longer_waiting_and_cant_be_resent_email_1()
     {
         var email = await CreateMemberAsync();
