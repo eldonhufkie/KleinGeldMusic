@@ -1,0 +1,89 @@
+@page "/admin/join-requests"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inject HttpClient Http
+
+<PageTitle>Join Requests · KleinGeld Music</PageTitle>
+
+<h1>Join Requests</h1>
+
+@if (_failed)
+{
+    <p class="validation-message" role="alert">Something went wrong. Reload the page and try again.</p>
+}
+
+@if (_open is null)
+{
+    <p role="status">Loading…</p>
+}
+else if (_open.Count == 0)
+{
+    <p>No open Join Requests.</p>
+}
+else
+{
+    <ul class="join-requests">
+        @foreach (var joinRequest in _open)
+        {
+            <li>
+                <h2>@joinRequest.Name</h2>
+                <p>@joinRequest.Email · <time datetime="@joinRequest.CreatedAt.ToString("O")">@joinRequest.CreatedAt.ToLocalTime().ToString("g")</time></p>
+                @if (joinRequest.EmailBelongsToMember)
+                {
+                    <p><strong>This email already belongs to a Member.</strong></p>
+                }
+                @if (joinRequest.DuplicateOfOpenRequest)
+                {
+                    <p><strong>There was already an open Join Request from this email.</strong></p>
+                }
+                <p class="join-request-message">@joinRequest.Message</p>
+                <button type="button" disabled="@(_approving is not null)" @onclick="() => ApproveAsync(joinRequest)">
+                    @(_approving == joinRequest.Id ? "Approving…" : "Approve")
+                </button>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private List<OpenJoinRequest>? _open;
+    private Guid? _approving;
+    private bool _failed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _open = await Http.GetFromJsonAsync<List<OpenJoinRequest>>("api/admin/join-requests");
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+
+    private async Task ApproveAsync(OpenJoinRequest joinRequest)
+    {
+        _approving = joinRequest.Id;
+        _failed = false;
+        try
+        {
+            using var response = await Http.PostAsync($"api/admin/join-requests/{joinRequest.Id}/approve", null);
+            if (response.IsSuccessStatusCode)
+            {
+                _open!.Remove(joinRequest);
+            }
+            else
+            {
+                _failed = true;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _approving = null;
+        }
+    }
+}

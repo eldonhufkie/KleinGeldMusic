@@ -1,3 +1,4 @@
+using KleinGeld.Contracts;
 using KleinGeld.Data;
 using KleinGeld.Web;
 using KleinGeld.Web.Api;
@@ -48,6 +49,7 @@ app.MapDefaultEndpoints();
 app.MapTestingEndpoints();
 app.MapGroup("/api").MapJoinRequestEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapMemberEndpoints();
+app.MapGroup("/api/admin").RequireAuthorization(admin => admin.RequireRole(Roles.Admin)).MapAdminJoinRequestEndpoints();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

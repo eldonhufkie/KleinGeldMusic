@@ -25,9 +25,14 @@ internal static class MemberAuthenticationExtensions
 
         builder.Services.AddMemberIdentityCore(options => options.SignIn.RequireConfirmedAccount = true)
             .AddSignInManager()
-            .AddDefaultTokenProviders();
+            .AddDefaultTokenProviders()
+            // Replaces the default provider the line above registered, so emailed links follow TimeProvider.
+            .AddTokenProvider<MemberTokenProvider>(TokenOptions.DefaultProvider);
 
         builder.Services.AddSingleton<IEmailSender<Member>, IdentityNoOpEmailSender>();
+
+        // Every emailed link (set password, reset password, change email) works for 15 minutes.
+        builder.Services.Configure<DataProtectionTokenProviderOptions>(options => options.TokenLifespan = TimeSpan.FromMinutes(15));
 
         // Check the security stamp on every request, so a Removed Member or a changed password
         // cuts off existing sessions at once instead of after Identity's default 30 minutes.
