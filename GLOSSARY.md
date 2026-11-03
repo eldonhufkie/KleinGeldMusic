@@ -81,3 +81,13 @@ _Avoid_: Queue, mix, collection
 **Queue**:
 The ordered Tracks the player will play in this browser, built from what the Member last pressed play on plus anything they added; not saved to their account and never shared.
 _Avoid_: Up next, now playing list
+
+## Hosting
+
+**Production**:
+The copy of KleinGeld Music that Members use, public on the internet. Its data is backed up.
+_Avoid_: Live, prod server
+
+**Test**:
+A second copy of KleinGeld Music for trying a release before Production gets it. Reachable on the tailnet only, sends every email to MailPit, and never holds a copy of Production's data. Not backed up.
+_Avoid_: Staging, acceptance, QA
