@@ -31,4 +31,18 @@ internal static class MemberEmails
             "Kind regards,",
             "KleinGeld Music",
         ]));
+
+    /// <summary>Email 3: Forgot password, with the link to choose a new one.</summary>
+    public static OutgoingEmail PasswordReset(MailboxAddress member, Uri setPasswordLink) =>
+        new(member, "Reset your KleinGeld Music password", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            "Someone asked to reset the password for this email address on KleinGeld Music.",
+            "Choose a new password here:",
+            "",
+            setPasswordLink.ToString(),
+            "",
+            "The link works for 15 minutes. If you didn't ask for this, you can ignore this email.",
+        ]));
 }

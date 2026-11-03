@@ -12,23 +12,30 @@ public sealed class MailPit(HttpClient client)
     /// Waits for the one email to <paramref name="to"/> whose text contains <paramref name="marker"/>, so tests
     /// sharing the one MailPit don't see each other's emails.
     /// </summary>
-    public async Task<Email> WaitForEmailAsync(string to, string marker)
+    public async Task<Email> WaitForEmailAsync(string to, string marker) =>
+        (await WaitForEmailsAsync(to, marker, count: 1))[0];
+
+    /// <summary>
+    /// Waits for exactly <paramref name="count"/> emails to <paramref name="to"/> whose text contains
+    /// <paramref name="marker"/>, newest first.
+    /// </summary>
+    public async Task<IReadOnlyList<Email>> WaitForEmailsAsync(string to, string marker, int count)
     {
         var deadline = DateTimeOffset.UtcNow + WaitTimeout;
         while (true)
         {
             var found = await SearchAsync(to, marker);
-            if (found.Count == 1)
+            if (found.Count == count)
             {
-                return await ReadAsync(found[0].Id);
+                return await Task.WhenAll(found.Select(message => ReadAsync(message.Id)));
             }
-            if (found.Count > 1)
+            if (found.Count > count)
             {
-                throw new InvalidOperationException($"{found.Count} emails to {to} contain \"{marker}\", expected one.");
+                throw new InvalidOperationException($"{found.Count} emails to {to} contain \"{marker}\", expected {count}.");
             }
             if (DateTimeOffset.UtcNow > deadline)
             {
-                throw new TimeoutException($"No email to {to} containing \"{marker}\" arrived within {WaitTimeout}.");
+                throw new TimeoutException($"{found.Count} of {count} emails to {to} containing \"{marker}\" arrived within {WaitTimeout}.");
             }
             await Task.Delay(TimeSpan.FromMilliseconds(100));
         }

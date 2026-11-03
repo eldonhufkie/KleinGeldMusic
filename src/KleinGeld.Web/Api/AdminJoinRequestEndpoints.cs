@@ -1,9 +1,7 @@
-using System.Text;
 using KleinGeld.Contracts;
 using KleinGeld.Data;
 using KleinGeld.Web.Email;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using MimeKit;
 
@@ -48,10 +46,7 @@ internal static class AdminJoinRequestEndpoints
                     detail: string.Join(" ", created.Errors.Select(error => error.Description)));
             }
 
-            var code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(await members.GeneratePasswordResetTokenAsync(member)));
-            var link = new Uri(QueryHelpers.AddQueryString(
-                $"{request.Scheme}://{request.Host}/Account/SetUpPassword",
-                new Dictionary<string, string?> { ["memberId"] = member.Id.ToString(), ["code"] = code }));
+            var link = await members.CreateSetPasswordLinkAsync(member, new Uri($"{request.Scheme}://{request.Host}"));
             await emails.SendAsync(MemberEmails.Approved(new MailboxAddress(joinRequest.Name, member.Email), joinRequest.Name, link));
 
             return Results.NoContent();
