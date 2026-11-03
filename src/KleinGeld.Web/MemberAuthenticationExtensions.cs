@@ -3,6 +3,7 @@ using KleinGeld.Web.Api;
 using KleinGeld.Web.Components.Account;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 
 namespace KleinGeld.Web;
@@ -12,6 +13,16 @@ internal static class MemberAuthenticationExtensions
     /// <summary>ASP.NET Core Identity with a same-origin login cookie, as in the Blazor Web App template.</summary>
     public static void AddMemberAuthentication(this WebApplicationBuilder builder)
     {
+        // On the server the keys folder is a bind-mounted dataset, so login cookies and emailed links
+        // survive a redeploy. Without it (local runs) ASP.NET Core keeps its default per-user key ring.
+        var keysPath = builder.Configuration["DataProtection:KeysPath"];
+        if (!string.IsNullOrEmpty(keysPath))
+        {
+            builder.Services.AddDataProtection()
+                .SetApplicationName("KleinGeld")
+                .PersistKeysToFileSystem(new DirectoryInfo(keysPath));
+        }
+
         builder.Services.AddCascadingAuthenticationState();
         builder.Services.AddScoped<IdentityRedirectManager>();
 

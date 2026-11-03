@@ -14,6 +14,9 @@ public sealed class KleinGeldApp : IAsyncLifetime
 
     private DistributedApplication? _app;
 
+    /// <summary>Where the web host keeps its Data Protection keys, as the bind-mounted keys folder does on the server.</summary>
+    public string DataProtectionKeysPath { get; } = Directory.CreateTempSubdirectory("kleingeld-keys-").FullName;
+
     private DistributedApplication App => _app ?? throw new InvalidOperationException("The app hasn't started.");
 
     public async Task InitializeAsync()
@@ -25,7 +28,8 @@ public sealed class KleinGeldApp : IAsyncLifetime
             "Postgres:DataVolume=false",
         ]);
         builder.CreateResourceBuilder<ProjectResource>("web")
-            .WithEnvironment("Testing__Enabled", "true");
+            .WithEnvironment("Testing__Enabled", "true")
+            .WithEnvironment("DataProtection__KeysPath", DataProtectionKeysPath);
 
         _app = await builder.BuildAsync().WaitAsync(StartupTimeout);
         await _app.StartAsync().WaitAsync(StartupTimeout);
