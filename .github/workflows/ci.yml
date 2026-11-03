@@ -1,6 +1,6 @@
 name: CI
 
-# Builds and tests every push and pull request. Never deploys.
+# Builds and tests every push and pull request. A push to main also publishes images and compose files. Never deploys.
 on:
   push:
   pull_request:
@@ -39,3 +39,77 @@ jobs:
 
       - name: Test
         run: dotnet test KleinGeldMusic.slnx --no-build
+
+  # A push to main publishes the release: images tagged with the commit SHA and the compose files
+  # for both copies. Deploying them is a separate job (#48).
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # The TrueNAS pool holding the kleingeld datasets (repository variable).
+      Deploy__Pool: ${{ vars.TRUENAS_POOL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Check the pool is set
+        run: test -n "$Deploy__Pool" || { echo "Set the TRUENAS_POOL repository variable."; exit 1; }
+
+      - name: Install the Aspire CLI bundle
+        run: |
+          dotnet dnx --yes aspire.cli@13.6.3 -- setup --install-path "$HOME/.aspire"
+          echo "$HOME/.aspire/bin" >> "$GITHUB_PATH"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Never `latest`: a release is always named by its commit SHA, which release.env on the server points at.
+      - name: Build and push the images
+        run: |
+          for project in Web Migrator; do
+            name="kleingeld-$(echo "$project" | tr '[:upper:]' '[:lower:]')"
+            dotnet publish "src/KleinGeld.$project" -c Release -t:PublishContainer \
+              -p:ContainerRegistry=ghcr.io \
+              -p:ContainerRepository="eldonhufkie/$name" \
+              -p:ContainerImageTags="${{ github.sha }}" \
+              -p:ContainerLabel=org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          done
+
+      # The generated compose files are build output, never committed; #48 deploys them.
+      - name: Generate the compose files
+        run: |
+          for copy in Production Test; do
+            Deploy__Copy=$copy aspire publish --apphost src/KleinGeld.AppHost/KleinGeld.AppHost.csproj \
+              -o "compose/$(echo "$copy" | tr '[:upper:]' '[:lower:]')" --non-interactive
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compose
+          path: compose/*/docker-compose.yaml
+          if-no-files-found: error
+
+  # Keeps the last 10 versions of each image. A new GHCR package starts private: make it public once
+  # in its package settings, so the server pulls without credentials.
+  prune-images:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        package: [kleingeld-web, kleingeld-migrator]
+    steps:
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ matrix.package }}
+          package-type: container
+          min-versions-to-keep: 10

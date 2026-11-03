@@ -5,7 +5,8 @@ using Microsoft.EntityFrameworkCore;
 // Applies EF Core migrations and seeds the Admin once, then exits; the web host waits for it to complete.
 var builder = Host.CreateApplicationBuilder(args);
 builder.AddServiceDefaults();
-builder.AddNpgsqlDbContext<KleinGeldDbContext>("kleingeld");
+// Retries transient failures (EnableRetryOnFailure), e.g. PostgreSQL still starting after a host reboot.
+builder.AddNpgsqlDbContext<KleinGeldDbContext>("kleingeld", settings => settings.DisableRetry = false);
 builder.Services.AddMemberIdentityCore();
 builder.Services.AddScoped<AdminSeeder>();
 
