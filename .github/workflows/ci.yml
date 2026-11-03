@@ -63,10 +63,11 @@ jobs:
       - name: Check the pool is set
         run: test -n "$Deploy__Pool" || { echo "Set the TRUENAS_POOL repository variable."; exit 1; }
 
-      - name: Install the Aspire CLI bundle
+      # The same version as the AppHost SDK. Global tools land in ~/.dotnet/tools, which the runner has on PATH.
+      - name: Install the Aspire CLI
         run: |
-          dotnet dnx --yes aspire.cli@13.6.3 -- setup --install-path "$HOME/.aspire"
-          echo "$HOME/.aspire/bin" >> "$GITHUB_PATH"
+          dotnet tool install --global Aspire.Cli --version 13.6.3
+          aspire --version
 
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
