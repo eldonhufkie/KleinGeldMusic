@@ -42,7 +42,7 @@ internal sealed record Deployment(Copy Copy, string DataPath)
         {
             throw new InvalidOperationException("Deploy:Pool (the TrueNAS pool holding the kleingeld datasets) is required to publish.");
         }
-        return new Deployment(copy, $"/mnt/{pool}/kleingeld/{copy.ToString().ToLowerInvariant()}");
+        return new Deployment(copy, $"/mnt/{pool}/Applications/kleingeld/{copy.ToString().ToLowerInvariant()}");
     }
 
     /// <summary>
