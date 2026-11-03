@@ -13,6 +13,7 @@ builder.AddClock();
 // Retries transient failures (EnableRetryOnFailure), e.g. PostgreSQL still starting after a host reboot.
 builder.AddNpgsqlDbContext<KleinGeldDbContext>("kleingeld", settings => settings.DisableRetry = false);
 builder.AddAzureBlobServiceClient("blobs");
+builder.Services.AddHostedService<BlobCorsSetup>();
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseMigratedHealthCheck>("database-migrated");
 

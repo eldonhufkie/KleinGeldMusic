@@ -74,21 +74,19 @@ jobs:
       # Never `latest`: a release is always named by its commit SHA, which release.env on the server points at.
       - name: Build and push the images
         run: |
-          for project in Web Migrator; do
-            name="kleingeld-$(echo "$project" | tr '[:upper:]' '[:lower:]')"
-            dotnet publish "src/KleinGeld.$project" -c Release -t:PublishContainer \
+          for app in web migrator; do
+            dotnet publish "src/KleinGeld.${app^}" -c Release -t:PublishContainer \
               -p:ContainerRegistry=ghcr.io \
-              -p:ContainerRepository="eldonhufkie/$name" \
-              -p:ContainerImageTags="${{ github.sha }}" \
-              -p:ContainerLabel=org.opencontainers.image.source=https://github.com/${{ github.repository }}
+              -p:ContainerRepository="eldonhufkie/kleingeld-$app" \
+              -p:ContainerImageTags="${{ github.sha }}"
           done
 
       # The generated compose files are build output, never committed; #48 deploys them.
       - name: Generate the compose files
         run: |
-          for copy in Production Test; do
+          for copy in production test; do
             Deploy__Copy=$copy aspire publish --apphost src/KleinGeld.AppHost/KleinGeld.AppHost.csproj \
-              -o "compose/$(echo "$copy" | tr '[:upper:]' '[:lower:]')" --non-interactive
+              -o "compose/$copy" --non-interactive
           done
 
       - uses: actions/upload-artifact@v4
