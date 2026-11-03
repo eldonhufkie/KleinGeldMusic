@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-KleinGeld.Migrator-6e84bdbd-b80f-4400-b284-cd5ea117ed97</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.6.3" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KleinGeld.ServiceDefaults\KleinGeld.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\KleinGeld.Data\KleinGeld.Data.csproj" />
+  </ItemGroup>
+</Project>

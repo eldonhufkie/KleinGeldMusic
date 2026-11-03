@@ -16,9 +16,21 @@ _Avoid_: Moderator, owner
 A request from someone outside the group to become a Member, which the Admin approves or rejects.
 _Avoid_: Sign-up, registration, invite
 
+**Leave**:
+A Member deleting themselves from KleinGeld Music, for good. The Admin can't Leave.
+_Avoid_: Delete account, unsubscribe, quit
+
+**Remove**:
+The Admin deleting a Member for good, with a reason told to that person.
+_Avoid_: Ban, kick, suspend, deactivate
+
 **Artist**:
-A public name music is published under, managed by one or more Members (a solo act or a band).
+A public name music is published under, managed by one or more Members (a solo act or a band). An Artist whose last managing Member Leaves or is Removed is deleted with them.
 _Avoid_: Band, creator, uploader, artist account
+
+**Stop managing**:
+A Member no longer managing an Artist, by their own choice or another managing Member's. The last managing Member can't Stop managing; they delete the Artist instead.
+_Avoid_: Leave (for an Artist), kick
 
 ## Music
 
@@ -51,7 +63,7 @@ An Artist hiding its own Published Release from other Members; it can later be r
 _Avoid_: Unpublish, delete
 
 **Unavailable Track**:
-A Track on a Playlist that can no longer be played because its Release was taken down or deleted, or the Track was removed from its Release; shown greyed out rather than removed.
+A Track on a Playlist that can no longer be played because its Release was taken down or deleted, or the Track was removed from its Release; shown greyed out rather than removed, and playable again if its Release is Published again.
 _Avoid_: Broken track, missing track
 
 **Single mark**:
@@ -63,9 +75,19 @@ An Artist's statement, made when submitting a Release, that they own the rights 
 _Avoid_: Copyright check, licence
 
 **Playlist**:
-A Member's personal, ordered list of Tracks drawn from any Releases.
+A Member's personal, ordered list of Tracks drawn from any Releases; a Track appears on it at most once.
 _Avoid_: Queue, mix, collection
 
 **Queue**:
 The ordered Tracks the player will play in this browser, built from what the Member last pressed play on plus anything they added; not saved to their account and never shared.
 _Avoid_: Up next, now playing list
+
+## Hosting
+
+**Production**:
+The copy of KleinGeld Music that Members use, public on the internet. Its data is backed up.
+_Avoid_: Live, prod server
+
+**Test**:
+A second copy of KleinGeld Music for trying a release before Production gets it. Reachable on the tailnet only, sends every email to MailPit, and never holds a copy of Production's data. Not backed up.
+_Avoid_: Staging, acceptance, QA

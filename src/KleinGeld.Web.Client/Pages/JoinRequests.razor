@@ -1,0 +1,126 @@
+@page "/admin/join-requests"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inject HttpClient Http
+
+<PageTitle>Join Requests · KleinGeld Music</PageTitle>
+
+<h1>Join Requests</h1>
+
+@if (_failed)
+{
+    <p class="validation-message" role="alert">Something went wrong. Reload the page and try again.</p>
+}
+
+@if (_open is null)
+{
+    <p role="status">Loading…</p>
+}
+else if (_open.Count == 0)
+{
+    <p>No open Join Requests.</p>
+}
+else
+{
+    <ul class="join-requests">
+        @foreach (var joinRequest in _open)
+        {
+            <li>
+                <h2>@joinRequest.Name</h2>
+                <p>@joinRequest.Email · <time datetime="@joinRequest.CreatedAt.ToString("O")">@joinRequest.CreatedAt.ToLocalTime().ToString("g")</time></p>
+                @if (joinRequest.EmailBelongsToMember)
+                {
+                    <p><strong>This email already belongs to a Member.</strong></p>
+                }
+                @if (joinRequest.DuplicateOfOpenRequest)
+                {
+                    <p><strong>There was already an open Join Request from this email.</strong></p>
+                }
+                <p class="join-request-message">@joinRequest.Message</p>
+                @if (_confirmingReject == joinRequest.Id)
+                {
+                    <p>Reject @joinRequest.Name? They'll get a short email with no reason.</p>
+                    <div class="join-request-actions">
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => DecideAsync(joinRequest, Decision.Reject)">
+                            @(_deciding == (joinRequest.Id, Decision.Reject) ? "Rejecting…" : "Reject")
+                        </button>
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => _confirmingReject = null">Cancel</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="join-request-actions">
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => DecideAsync(joinRequest, Decision.Approve)">
+                            @(_deciding == (joinRequest.Id, Decision.Approve) ? "Approving…" : "Approve")
+                        </button>
+                        @* Flagged requests are usually noise, so they reject in one click; others ask first. *@
+                        <button type="button" disabled="@(_deciding is not null)" @onclick="() => RejectOrConfirmAsync(joinRequest)">
+                            @(_deciding == (joinRequest.Id, Decision.Reject) ? "Rejecting…" : "Reject")
+                        </button>
+                    </div>
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private List<OpenJoinRequest>? _open;
+    private enum Decision { Approve, Reject }
+
+    /// <summary>The Join Request whose decision is on its way to the API, which disables every button.</summary>
+    private (Guid Id, Decision Decision)? _deciding;
+    private Guid? _confirmingReject;
+    private bool _failed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _open = await Http.GetFromJsonAsync<List<OpenJoinRequest>>("api/admin/join-requests");
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+
+    private async Task RejectOrConfirmAsync(OpenJoinRequest joinRequest)
+    {
+        if (joinRequest.EmailBelongsToMember || joinRequest.DuplicateOfOpenRequest)
+        {
+            await DecideAsync(joinRequest, Decision.Reject);
+        }
+        else
+        {
+            _confirmingReject = joinRequest.Id;
+        }
+    }
+
+    private async Task DecideAsync(OpenJoinRequest joinRequest, Decision decision)
+    {
+        _deciding = (joinRequest.Id, decision);
+        _failed = false;
+        var action = decision == Decision.Approve ? "approve" : "reject";
+        try
+        {
+            using var response = await Http.PostAsync($"api/admin/join-requests/{joinRequest.Id}/{action}", null);
+            if (response.IsSuccessStatusCode)
+            {
+                _open!.Remove(joinRequest);
+            }
+            else
+            {
+                _failed = true;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _deciding = null;
+            _confirmingReject = null;
+        }
+    }
+}

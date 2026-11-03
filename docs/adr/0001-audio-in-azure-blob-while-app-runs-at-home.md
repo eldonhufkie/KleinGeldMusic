@@ -8,6 +8,7 @@ The app (API, web front end, PostgreSQL, conversion job) runs on a home TrueNAS 
 
 ## Consequences
 
-- A Takedown hides a Release at once, but playback links already handed out keep working until they expire (about 1 hour).
+- A Takedown hides a Release at once, but playback links already handed out keep working until they're revoked. Links last about 10 minutes and are signed against a stored access policy that the app rotates whenever access is taken away (Takedown, Reject, delete, Remove, Leave), so they stop within about 30 seconds. Players fetch a fresh link when one fails.
+- Because stored access policies only work with service SAS, the app signs links with the storage account key rather than a user delegation key.
 - A small monthly Azure bill (storage plus any streaming beyond the free egress allowance), and a dependency on Azure for playback.
 - The Azure storage account needs CORS rules for the site's address so browsers can upload and play directly.

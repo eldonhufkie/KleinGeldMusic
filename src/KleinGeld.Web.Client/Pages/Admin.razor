@@ -1,0 +1,11 @@
+@page "/admin"
+@attribute [Authorize(Roles = Roles.Admin)]
+
+<PageTitle>Admin · KleinGeld Music</PageTitle>
+
+<h1>Admin</h1>
+
+<ul>
+    <li><a href="admin/join-requests">Join Requests</a></li>
+    <li><a href="admin/awaiting-password">Waiting to set a password</a></li>
+</ul>

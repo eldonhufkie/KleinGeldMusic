@@ -1,0 +1,21 @@
+<details class="profile-menu">
+    <summary>@Email</summary>
+    <a href="Account/Manage">Settings</a>
+    <form action="Account/Logout" method="post">
+        <AntiforgeryToken />
+        <input type="hidden" name="ReturnUrl" value="" />
+        <button type="submit">Log out</button>
+    </form>
+</details>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+
+    private string? Email { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Email = (await AuthenticationState).User.Identity?.Name;
+    }
+}

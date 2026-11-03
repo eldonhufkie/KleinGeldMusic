@@ -1,0 +1,7 @@
+<nav class="sidebar" aria-label="Main">
+    <div class="sidebar-logo">KleinGeld Music</div>
+    <NavLink href="" Match="NavLinkMatch.All">Home</NavLink>
+    <AuthorizeView Roles="@Roles.Admin">
+        <NavLink href="admin">Admin</NavLink>
+    </AuthorizeView>
+</nav>
