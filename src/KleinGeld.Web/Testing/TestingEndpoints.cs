@@ -71,7 +71,7 @@ internal static class TestingEndpoints
             {
                 ArtistId = seeded.ArtistId,
                 Title = r.Title,
-                Slug = "seeded",
+                Slug = Slugs.From(r.Title),
                 Type = seeded.Type,
                 ReleaseDate = r.ReleaseDate,
                 Stage = ReleaseStage.Published,
@@ -80,6 +80,9 @@ internal static class TestingEndpoints
             await db.SaveChangesAsync();
             return Results.NoContent();
         });
+
+        testing.MapGet("/releases/{id:guid}/rejection-reason", async (Guid id, KleinGeldDbContext db) =>
+            Results.Json(await db.Releases.Where(r => r.Id == id).Select(r => r.RejectionReason).SingleAsync()));
 
         testing.MapPost("/security-stamp",async (UserManager<Member> members, [FromBody] string email) =>
         {

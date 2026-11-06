@@ -90,6 +90,13 @@ public sealed class KleinGeldApp : IAsyncLifetime
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>The reason as stored, which the API only shows while the Release is Rejected.</summary>
+    public async Task<string?> ReadStoredRejectionReasonAsync(Guid releaseId)
+    {
+        using var client = CreateWebClient();
+        return await client.GetFromJsonAsync<string?>($"/testing/releases/{releaseId}/rejection-reason");
+    }
+
     /// <summary>Adds Artists with a Published Release straight to the database, for lists longer than one load.</summary>
     public async Task SeedPublishedArtistsAsync(IEnumerable<string> names)
     {
