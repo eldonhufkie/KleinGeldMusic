@@ -757,9 +757,9 @@ public sealed class PlayerServiceTests
     }
 
     [Fact]
-    public async Task A_play_link_arriving_after_shuffle_shifted_the_Queue_is_dropped()
+    public async Task Next_still_finishes_when_shuffle_is_turned_on_while_its_link_is_on_its_way()
     {
-        var album = Album("Een", "Twee", "Drie");
+        var album = Album("Een", "Twee", "Drie", "Vier");
         await _player.PlayAsync(album, 0);
         var slow = _links.Hold(album[1].Id);
         var next = _player.NextAsync();
@@ -768,8 +768,174 @@ public sealed class PlayerServiceTests
         slow.SetResult();
         await next;
 
+        Assert.Equal(album[1], _player.Current);
+        Assert.Equal(LinkOf(album[1]), _audio.PlayingSource);
+        Assert.Equal(["Een", "Twee", "Vier", "Drie"], Titles());
+    }
+
+    [Fact]
+    public async Task Next_still_finishes_and_Play_next_follows_it_when_pressed_while_its_link_is_on_its_way()
+    {
+        var album = Album("Een", "Twee", "Drie");
+        var extra = Album("Extra")[0];
+        await _player.PlayAsync(album, 0);
+        var slow = _links.Hold(album[1].Id);
+        var next = _player.NextAsync();
+
+        await _player.PlayNextAsync(extra);
+        slow.SetResult();
+        await next;
+
+        Assert.Equal(album[1], _player.Current);
+        Assert.Equal(["Een", "Twee", "Extra", "Drie"], Titles());
+    }
+
+    [Fact]
+    public async Task A_Track_ending_by_itself_still_moves_on_when_the_Queue_changes_while_the_link_is_on_its_way()
+    {
+        var album = Album("Een", "Twee", "Drie");
+        await _player.PlayAsync(album, 0);
+        var slow = _links.Hold(album[1].Id);
+        var ended = _audio.EndAsync();
+
+        _player.RemoveFromQueue(2);
+        slow.SetResult();
+        await ended;
+
+        Assert.Equal(album[1], _player.Current);
+        Assert.Equal(LinkOf(album[1]), _audio.PlayingSource);
+    }
+
+    [Fact]
+    public async Task Next_lands_on_its_Track_when_an_earlier_one_is_removed_while_its_link_is_on_its_way()
+    {
+        var album = Album("Een", "Twee", "Drie");
+        await _player.PlayAsync(album, 1);
+        var slow = _links.Hold(album[2].Id);
+        var next = _player.NextAsync();
+
+        _player.RemoveFromQueue(0);
+        slow.SetResult();
+        await next;
+
+        Assert.Equal(album[2], _player.Current);
+        Assert.Equal(1, _player.CurrentIndex);
+    }
+
+    [Fact]
+    public async Task Removing_the_Track_Next_is_fetching_moves_on_to_the_one_after_it()
+    {
+        var album = Album("Een", "Twee", "Drie");
+        await _player.PlayAsync(album, 0);
+        var slow = _links.Hold(album[1].Id);
+        var next = _player.NextAsync();
+
+        _player.RemoveFromQueue(1);
+        slow.SetResult();
+        await next;
+
+        Assert.Equal(album[2], _player.Current);
+        Assert.Equal(LinkOf(album[2]), _audio.PlayingSource);
+    }
+
+    [Fact]
+    public async Task Play_next_during_Previous_keeps_the_Queue_in_step()
+    {
+        var album = Album("Een", "Twee");
+        var extra = Album("Extra")[0];
+        await _player.PlayAsync(album, 1);
+        var slow = _links.Hold(album[0].Id);
+        var previous = _player.PreviousAsync();
+
+        await _player.PlayNextAsync(extra);
+
+        Assert.Equal(album[1], _player.Current);
+
+        slow.SetResult();
+        await previous;
+
         Assert.Equal(album[0], _player.Current);
-        Assert.Equal(LinkOf(album[0]), _audio.PlayingSource);
+        Assert.Equal(["Een", "Extra", "Twee"], Titles());
+    }
+
+    [Fact]
+    public async Task Add_to_queue_during_a_first_Play_joins_the_Queue_that_starts()
+    {
+        var album = Album("Een", "Twee");
+        var extra = Album("Extra")[0];
+        var slow = _links.Hold(album[0].Id);
+        var play = _player.PlayAsync(album, 0);
+
+        await _player.AddToQueueAsync(extra);
+        slow.SetResult();
+        await play;
+
+        Assert.Equal(album[0], _player.Current);
+        Assert.Equal(["Een", "Twee", "Extra"], Titles());
+    }
+
+    [Fact]
+    public async Task Add_to_queue_during_a_Play_that_replaces_the_Queue_joins_the_new_Queue()
+    {
+        var old = Album("Oud");
+        var album = Album("Een", "Twee");
+        var extra = Album("Extra")[0];
+        await _player.PlayAsync(old, 0);
+        var slow = _links.Hold(album[0].Id);
+        var play = _player.PlayAsync(album, 0);
+
+        await _player.AddToQueueAsync(extra);
+        slow.SetResult();
+        await play;
+
+        Assert.Equal(["Een", "Twee", "Extra"], Titles());
+    }
+
+    [Fact]
+    public async Task Add_to_queue_survives_a_Play_that_is_refused_while_it_was_pressed()
+    {
+        var old = Album("Oud");
+        var album = Album("Een");
+        var extra = Album("Extra")[0];
+        await _player.PlayAsync(old, 0);
+        _links.Remove(album[0].Id);
+        var slow = _links.Hold(album[0].Id);
+        var play = _player.PlayAsync(album, 0);
+
+        await _player.AddToQueueAsync(extra);
+        slow.SetResult();
+        await play;
+
+        Assert.Equal(["Oud", "Extra"], Titles());
+    }
+
+    [Fact]
+    public async Task Play_next_during_a_Play_goes_right_after_the_pressed_Track()
+    {
+        var album = Album("Een", "Twee");
+        var extra = Album("Extra")[0];
+        var slow = _links.Hold(album[0].Id);
+        var play = _player.PlayAsync(album, 0);
+
+        await _player.PlayNextAsync(extra);
+        slow.SetResult();
+        await play;
+
+        Assert.Equal(["Een", "Extra", "Twee"], Titles());
+    }
+
+    [Fact]
+    public async Task Turning_shuffle_on_during_a_Play_shuffles_the_Queue_that_starts()
+    {
+        var album = Album("Een", "Twee", "Drie");
+        var slow = _links.Hold(album[0].Id);
+        var play = _player.PlayAsync(album, 0);
+
+        _player.SetShuffle(true);
+        slow.SetResult();
+        await play;
+
+        Assert.Equal(["Een", "Drie", "Twee"], Titles());
     }
 
     private List<string> Titles() => _player.Queue.Select(track => track.Title).ToList();
