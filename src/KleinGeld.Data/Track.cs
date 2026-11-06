@@ -19,6 +19,14 @@ public sealed class Track
     /// <summary>The Track number, from 1, without gaps.</summary>
     public required int Position { get; set; }
 
+    /// <summary>Whether the Track was also put out as a Single, whatever the Release type of its own Release.</summary>
+    public bool SingleMark { get; set; }
+
+    /// <summary>Free text: featured Artists needn't be Artists on KleinGeld Music.</summary>
+    public string? FeaturedArtists { get; set; }
+
+    public bool Explicit { get; set; }
+
     public TrackStatus Status { get; set; } = TrackStatus.Uploading;
 
     /// <summary>Where the uploaded file is. Blob names are write-once: new audio gets a new name.</summary>

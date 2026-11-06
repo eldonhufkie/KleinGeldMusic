@@ -1,4 +1,5 @@
 using KleinGeld.Data;
+using KleinGeld.Web.Blobs;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 
@@ -32,7 +33,13 @@ internal static class TestingEndpoints
             return Results.NoContent();
         });
 
-        testing.MapPost("/security-stamp", async (UserManager<Member> members, [FromBody] string email) =>
+        testing.MapPost("/upload-clean-up", async (UploadCleanUp cleanUp) =>
+        {
+            await cleanUp.RunAsync();
+            return Results.NoContent();
+        });
+
+        testing.MapPost("/security-stamp",async (UserManager<Member> members, [FromBody] string email) =>
         {
             var member = await members.FindByEmailAsync(email);
             if (member is null)

@@ -18,6 +18,8 @@ builder.Services.AddHostedService<BlobCorsSetup>();
 builder.Services.AddSingleton<BlobLinks>();
 builder.Services.AddSingleton<CoverStore>();
 builder.Services.AddSingleton<AudioProbe>();
+builder.Services.AddSingleton<UploadCleanUp>();
+builder.Services.AddHostedService<DailyUploadCleanUp>();
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseMigratedHealthCheck>("database-migrated");
 
