@@ -13,6 +13,9 @@ public sealed class Track
 
     public required string Title { get; set; }
 
+    /// <summary>A Member changed the title, so the tag of the file must leave it alone.</summary>
+    public bool TitleTyped { get; set; }
+
     /// <summary>The Track number, from 1, without gaps.</summary>
     public required int Position { get; set; }
 

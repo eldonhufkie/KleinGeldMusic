@@ -312,6 +312,23 @@ public sealed class TrackTests(KleinGeldApp app)
         Assert.Equal(uploaded.Large.AbsolutePath, kept.Large.AbsolutePath);
     }
 
+    [Fact]
+    public async Task A_Track_title_typed_during_the_upload_survives_the_tag()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+        var file = await ReadFixtureAsync("tagged.mp3");
+        var upload = await RequestUploadAsync(manager, release, "tagged.mp3", file.Length);
+        using var typed = await manager.PutAsJsonAsync(
+            $"/api/releases/{release.Id}/tracks/{upload.Track.Id}", new TrackForm { Title = "Mijn Titel" });
+        Assert.Equal(HttpStatusCode.OK, typed.StatusCode);
+
+        await PutBlobAsync(upload.UploadLink, file);
+        using var confirmed = await ConfirmAsync(manager, release, upload);
+
+        Assert.Equal("Mijn Titel", Assert.Single(await ListTracksAsync(manager, release)).Title);
+    }
+
     private static byte[] Square1000Png()
     {
         using var bitmap = new SKBitmap(1000, 1000);
@@ -336,6 +353,8 @@ public sealed class TrackTests(KleinGeldApp app)
         return response.StatusCode == HttpStatusCode.Redirect
             ? (await manager.GetFromJsonAsync<ReleaseDetails>(response.Headers.Location))!
             : (await response.Content.ReadFromJsonAsync<ReleaseDetails>())!;
+    }
+
     [Fact]
     public async Task A_managing_Member_sets_a_Track_s_title_Single_mark_featured_Artists_and_explicit_flag()
     {

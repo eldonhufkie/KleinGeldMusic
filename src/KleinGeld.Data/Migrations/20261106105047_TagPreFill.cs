@@ -6,11 +6,18 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace KleinGeld.Data.Migrations
 {
     /// <inheritdoc />
-    public partial class ReleaseDetailsMayBeBlank : Migration
+    public partial class TagPreFill : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<bool>(
+                name: "TitleTyped",
+                table: "Tracks",
+                type: "boolean",
+                nullable: false,
+                defaultValue: false);
+
             migrationBuilder.AlterColumn<DateOnly>(
                 name: "ReleaseDate",
                 table: "Releases",
@@ -23,6 +30,10 @@ namespace KleinGeld.Data.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropColumn(
+                name: "TitleTyped",
+                table: "Tracks");
+
             migrationBuilder.AlterColumn<DateOnly>(
                 name: "ReleaseDate",
                 table: "Releases",

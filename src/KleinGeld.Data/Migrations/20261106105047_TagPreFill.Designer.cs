@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace KleinGeld.Data.Migrations
 {
     [DbContext(typeof(KleinGeldDbContext))]
-    [Migration("20261106104922_ReleaseDetailsMayBeBlank")]
-    partial class ReleaseDetailsMayBeBlank
+    [Migration("20261106105047_TagPreFill")]
+    partial class TagPreFill
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -260,6 +260,9 @@ namespace KleinGeld.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("TitleTyped")
+                        .HasColumnType("boolean");
 
                     b.HasKey("Id");
 

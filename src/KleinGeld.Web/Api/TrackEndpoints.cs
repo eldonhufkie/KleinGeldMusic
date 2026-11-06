@@ -124,7 +124,7 @@ internal static class TrackEndpoints
                     return Results.NotFound();
                 }
 
-                confirmed.Title = tags.Title ?? confirmed.Title;
+                confirmed.Title = confirmed.TitleTyped ? confirmed.Title : tags.Title ?? confirmed.Title;
                 confirmed.Status = TrackStatus.Converting;
                 if (confirmed.Position == 1)
                 {
@@ -173,6 +173,7 @@ internal static class TrackEndpoints
                     return Results.NotFound();
                 }
 
+                track.TitleTyped |= track.Title != form.Title.Trim();
                 track.Title = form.Title.Trim();
                 track.SingleMark = form.SingleMark;
                 track.FeaturedArtists = string.IsNullOrWhiteSpace(form.FeaturedArtists) ? null : form.FeaturedArtists.Trim();
