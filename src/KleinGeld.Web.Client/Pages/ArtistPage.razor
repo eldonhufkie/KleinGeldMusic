@@ -2,8 +2,9 @@
 @attribute [Authorize]
 @inject HttpClient Http
 @inject NavigationManager Navigation
+@inject PlayerService Player
 
-@* The public Artist page. Only the name so far; the API answers "not found" to Members who may not see the Artist. *@
+@* The public Artist page: a listener's view for everyone, managers too. They manage it from My Artists. *@
 
 <PageTitle>@(_artist?.Name ?? "Artist") · KleinGeld Music</PageTitle>
 
@@ -18,6 +19,19 @@ else if (_artist is null)
 else
 {
     <h1>@_artist.Name</h1>
+
+    @if (_artist.Newest is not null)
+    {
+        <p><button type="button" aria-label="Play @_artist.Newest.Title" @onclick="PlayNewestAsync">Play</button></p>
+    }
+    @if (_problem is not null)
+    {
+        <p role="alert">@_problem</p>
+    }
+
+    @Section("Albums", _artist.Albums)
+    @Section("EPs", _artist.EPs)
+    @Section("Singles", _artist.Singles)
 }
 
 @code {
@@ -27,14 +41,63 @@ else
     [Parameter]
     public string? Slug { get; set; }
 
-    private ArtistSummary? _artist;
+    private ArtistDetails? _artist;
     private bool _failed;
+    private string? _problem;
+
+    private RenderFragment Section(string title, IReadOnlyList<ArtistRelease> releases) =>
+        @<text>
+            @if (releases.Count > 0)
+            {
+                <h2>@title</h2>
+                <ul class="card-grid">
+                    @foreach (var release in releases)
+                    {
+                        <li @key="release.Id">
+                            <a href="releases/@release.Id/@release.Slug">
+                                @if (release.Cover is not null)
+                                {
+                                    <img class="cover-art" src="@release.Cover.Small" alt="" loading="lazy" />
+                                }
+                                else
+                                {
+                                    <span class="cover-missing"></span>
+                                }
+                                <span>@release.Title</span>
+                                <span class="card-detail">@release.ReleaseDate?.Year</span>
+                            </a>
+                        </li>
+                    }
+                </ul>
+            }
+        </text>;
+
+    private async Task PlayNewestAsync()
+    {
+        _problem = null;
+        try
+        {
+            var tracks = await Http.GetFromJsonAsync<List<TrackSummary>>($"api/tracks?releaseId={_artist!.Newest!.Id}");
+            var release = tracks!
+                .Select(t => new PlayerTrack(t.Id, t.Title, _artist.Name, t.Status == TrackStatus.Ready))
+                .ToList();
+            var first = release.FindIndex(t => t.IsAvailable);
+            if (first >= 0)
+            {
+                await Player.PlayAsync(release, first);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _problem = "Something went wrong. Try again.";
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
         try
         {
-            _artist = await Http.GetFromJsonAsync<ArtistSummary>($"api/artists/{Id}/{Slug}");
+            _artist = await Http.GetFromJsonAsync<ArtistDetails>($"api/artists/{Id}/{Slug}");
             if (_artist!.Slug != Slug)
             {
                 Navigation.NavigateTo($"artists/{Id}/{_artist.Slug}", replace: true);
