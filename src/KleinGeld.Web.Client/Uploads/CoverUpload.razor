@@ -25,6 +25,10 @@
     [Parameter, EditorRequired]
     public required ReleaseDetails Release { get; set; }
 
+    /// <summary>A new cover was accepted.</summary>
+    [Parameter]
+    public EventCallback<CoverArt?> OnUploaded { get; set; }
+
     private ElementReference _input;
     private CoverArt? _cover;
     private int? _progress;
@@ -58,6 +62,7 @@
             if (confirmed.IsSuccessStatusCode)
             {
                 _cover = (await confirmed.Content.ReadFromJsonAsync<ReleaseDetails>())!.Cover;
+                await OnUploaded.InvokeAsync(_cover);
             }
             else
             {

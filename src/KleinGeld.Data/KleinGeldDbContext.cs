@@ -16,6 +16,8 @@ public sealed class KleinGeldDbContext(DbContextOptions<KleinGeldDbContext> opti
 
     public DbSet<Track> Tracks => Set<Track>();
 
+    public DbSet<RightsDeclaration> RightsDeclarations => Set<RightsDeclaration>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -46,6 +48,12 @@ public sealed class KleinGeldDbContext(DbContextOptions<KleinGeldDbContext> opti
             release.Property(r => r.Genre).HasMaxLength(ReleaseForm.GenreMaxLength);
             release.Property(r => r.Stage).HasConversion<string>().HasMaxLength(16);
             release.HasOne(r => r.Artist).WithMany(a => a.Releases).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<RightsDeclaration>(declaration =>
+        {
+            declaration.HasOne<Release>().WithMany(r => r.RightsDeclarations).HasForeignKey(d => d.ReleaseId).OnDelete(DeleteBehavior.Cascade);
+            declaration.HasOne<Member>().WithMany().HasForeignKey(d => d.MemberId).OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<Track>(track =>

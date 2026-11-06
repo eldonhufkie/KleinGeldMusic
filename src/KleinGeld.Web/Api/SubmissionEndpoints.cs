@@ -2,6 +2,10 @@ using System.Security.Claims;
 using KleinGeld.Contracts;
 using KleinGeld.Data;
 using KleinGeld.Web.Blobs;
+using KleinGeld.Web.Email;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using MimeKit;
 
 namespace KleinGeld.Web.Api;
 
@@ -10,7 +14,16 @@ internal static class SubmissionEndpoints
     /// <summary>Endpoints for managing Members to send a Release to the Admin's review and take it back.</summary>
     public static void MapSubmissionEndpoints(this RouteGroupBuilder api)
     {
-        api.MapPost("/releases/{id:guid}/submit", async (Guid id, SubmitForm form, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers) =>
+        api.MapPost("/releases/{id:guid}/submit", async (
+            Guid id,
+            SubmitForm form,
+            ClaimsPrincipal caller,
+            KleinGeldDbContext db,
+            CoverStore covers,
+            TimeProvider clock,
+            UserManager<Member> members,
+            EmailSender emails,
+            ILoggerFactory loggers) =>
         {
             if (!form.RightsDeclared)
             {
@@ -31,12 +44,45 @@ internal static class SubmissionEndpoints
                     return Results.Problem(refusal, statusCode: StatusCodes.Status409Conflict);
                 }
 
+                db.RightsDeclarations.Add(new RightsDeclaration
+                {
+                    ReleaseId = release.Id,
+                    MemberId = caller.MemberId(),
+                    MadeAt = clock.GetUtcNow(),
+                    WordingVersion = RightsDeclarationWording.Version,
+                });
                 release.Stage = ReleaseStage.Submitted;
                 await db.SaveChangesAsync();
                 submitted = release;
                 return null;
             });
-            return refused ?? Results.Ok(submitted!.ToDetails(covers));
+            if (refused is not null)
+            {
+                return refused;
+            }
+
+            // The Release is Submitted whatever happens here: the Review page shows it even if the email fails.
+            try
+            {
+                var managerIds = await db.Artists
+                    .Where(a => a.Id == submitted!.ArtistId)
+                    .SelectMany(a => a.Managers)
+                    .Select(m => m.Id)
+                    .ToListAsync();
+                var admins = await members.GetUsersInRoleAsync(Roles.Admin);
+
+                // The Admin's own Artist: they know, whichever manager pressed Submit.
+                foreach (var admin in admins.Any(a => managerIds.Contains(a.Id)) ? [] : admins)
+                {
+                    await emails.SendAsync(AdminEmails.ReleaseSubmitted(new MailboxAddress(null, admin.Email!), submitted!));
+                }
+            }
+            catch (Exception exception)
+            {
+                loggers.CreateLogger(typeof(SubmissionEndpoints)).LogError(exception, "Couldn't email the Admin about Release {ReleaseId}.", id);
+            }
+
+            return Results.Ok(submitted!.ToDetails(covers));
         });
 
         api.MapPost("/releases/{id:guid}/withdraw", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers) =>

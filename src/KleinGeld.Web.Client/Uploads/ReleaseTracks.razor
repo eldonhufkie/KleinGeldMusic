@@ -86,11 +86,16 @@
     [Parameter]
     public EventCallback OnConfirmed { get; set; }
 
+    /// <summary>The Tracks or their statuses changed, which decides whether the Release can be Submitted.</summary>
+    [Parameter]
+    public EventCallback<IReadOnlyCollection<TrackStatus>> OnStatusesChanged { get; set; }
+
     private sealed record Problem(string? Detail);
 
     private readonly Dictionary<Guid, int> _progress = [];
     private readonly List<string> _messages = [];
     private List<TrackSummary> _tracks = [];
+    private List<TrackStatus> _reportedStatuses = [];
     private ElementReference _input;
     private readonly CancellationTokenSource _closing = new();
     private ElementReference _replacementInput;
@@ -128,6 +133,14 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // Only on a real change: telling the editor renders it, which renders this list again.
+        var statuses = _tracks.Select(t => t.Status).ToList();
+        if (!statuses.SequenceEqual(_reportedStatuses))
+        {
+            _reportedStatuses = statuses;
+            await OnStatusesChanged.InvokeAsync(statuses);
+        }
+
         if (firstRender)
         {
             _self = DotNetObjectReference.Create(this);

@@ -29,6 +29,7 @@ builder.AddEmailSender();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IManagedArtistsState, ServerManagedArtistsState>();
+builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IReviewCountState, ServerReviewCountState>();
 
 builder.Services.AddProblemDetails();
 // Checks API request bodies against their DataAnnotations and answers 400 with the errors.
@@ -69,6 +70,7 @@ app.MapGroup("/api").RequireAuthorization().MapSubmissionEndpoints();
 var adminApi = app.MapGroup("/api/admin").RequireAuthorization(admin => admin.RequireRole(Roles.Admin));
 adminApi.MapAdminJoinRequestEndpoints();
 adminApi.MapAdminMemberEndpoints();
+adminApi.MapAdminReviewEndpoints();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

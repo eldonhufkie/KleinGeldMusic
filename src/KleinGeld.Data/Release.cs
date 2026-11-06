@@ -31,4 +31,7 @@ public sealed class Release
     public Guid? CoverId { get; set; }
 
     public List<Track> Tracks { get; init; } = [];
+
+    /// <summary>One per submission, so a resubmitted Release has several; the newest dates the current one.</summary>
+    public List<RightsDeclaration> RightsDeclarations { get; init; } = [];
 }

@@ -221,6 +221,33 @@ namespace KleinGeld.Data.Migrations
                     b.ToTable("Releases");
                 });
 
+            modelBuilder.Entity("KleinGeld.Data.RightsDeclaration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("MadeAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ReleaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("WordingVersion")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId");
+
+                    b.HasIndex("ReleaseId");
+
+                    b.ToTable("RightsDeclarations");
+                });
+
             modelBuilder.Entity("KleinGeld.Data.Track", b =>
                 {
                     b.Property<Guid>("Id")
@@ -454,6 +481,20 @@ namespace KleinGeld.Data.Migrations
                     b.Navigation("Artist");
                 });
 
+            modelBuilder.Entity("KleinGeld.Data.RightsDeclaration", b =>
+                {
+                    b.HasOne("KleinGeld.Data.Member", null)
+                        .WithMany()
+                        .HasForeignKey("MemberId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("KleinGeld.Data.Release", null)
+                        .WithMany("RightsDeclarations")
+                        .HasForeignKey("ReleaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KleinGeld.Data.Track", b =>
                 {
                     b.HasOne("KleinGeld.Data.Release", "Release")
@@ -574,6 +615,8 @@ namespace KleinGeld.Data.Migrations
 
             modelBuilder.Entity("KleinGeld.Data.Release", b =>
                 {
+                    b.Navigation("RightsDeclarations");
+
                     b.Navigation("Tracks");
                 });
 #pragma warning restore 612, 618

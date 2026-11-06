@@ -28,4 +28,13 @@ internal static class AdminEmails
 
         return new(admin, $"New Join Request from {joinRequest.Name}", string.Join(Environment.NewLine, lines));
     }
+
+    /// <summary>Email 6: a Release was Submitted.</summary>
+    public static OutgoingEmail ReleaseSubmitted(MailboxAddress admin, Release release) =>
+        new(admin, $"{release.Artist.Name} submitted {release.Title}", string.Join(Environment.NewLine,
+        [
+            $"{release.Artist.Name} submitted \"{release.Title}\" for review.",
+            "",
+            "Find it on the Review page.",
+        ]));
 }

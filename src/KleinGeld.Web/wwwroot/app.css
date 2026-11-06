@@ -218,6 +218,21 @@ body:has(.app-shell) #app-loading {
     opacity: 0.6;
 }
 
+.review-badge {
+    border: 1px solid currentColor;
+    border-radius: 0.75rem;
+    font-size: 0.75rem;
+    font-weight: bold;
+    margin-left: 0.25rem;
+    padding: 0 0.4rem;
+}
+
+.release-fields {
+    border: 0;
+    margin: 0;
+    padding: 0;
+}
+
 .stage-badge {
     border: 1px solid currentColor;
     border-radius: 0.25rem;

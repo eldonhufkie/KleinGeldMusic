@@ -207,6 +207,153 @@ public sealed class SubmitReleaseTests(KleinGeldApp app) : IAsyncLifetime
         Assert.Equal(release.Title, read.Title);
     }
 
+    [Fact]
+    public async Task The_Review_page_lists_Submitted_Releases_oldest_first_and_nothing_else()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var newer = await CreateCompleteDraftAsync(manager, "De Nieuwere");
+        var older = await CreateCompleteDraftAsync(manager, "De Oudere");
+        var withdrawn = await CreateCompleteDraftAsync(manager, "De Teruggetrokkene");
+        var draft = await CreateCompleteDraftAsync(manager, "Het Ontwerp");
+
+        var monday = new DateTimeOffset(2026, 3, 2, 9, 0, 0, TimeSpan.Zero);
+        await app.SetClockAsync(monday.AddDays(1));
+        using var newerSubmitted = await SubmitAsync(manager, newer);
+        await app.SetClockAsync(monday);
+        using var olderSubmitted = await SubmitAsync(manager, older);
+        using var withdrawnSubmitted = await SubmitAsync(manager, withdrawn);
+        using var taken = await WithdrawAsync(manager, withdrawn);
+        await app.SetClockAsync(DateTimeOffset.UtcNow);
+
+        var ours = (await ReadReviewAsync(admin)).Where(r => new[] { newer.Id, older.Id, withdrawn.Id, draft.Id }.Contains(r.Id)).ToList();
+
+        Assert.Equal([older.Id, newer.Id], ours.Select(r => r.Id));
+        Assert.Equal(monday, ours[0].SubmittedAt);
+        Assert.Equal("De Inzenders", ours[0].ArtistName);
+    }
+
+    [Fact]
+    public async Task Each_submission_records_its_Member_time_and_wording_version()
+    {
+        var firstName = $"Eerste {Guid.NewGuid():N}";
+        using var manager = await app.LoginAsNewMemberAsync(firstName);
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreateCompleteDraftAsync(manager);
+        var first = new DateTimeOffset(2026, 3, 2, 9, 0, 0, TimeSpan.Zero);
+        var second = first.AddHours(2);
+
+        await app.SetClockAsync(first);
+        using var submitted = await SubmitAsync(manager, release);
+        using var withdrawn = await WithdrawAsync(manager, release);
+        await app.SetClockAsync(second);
+        using var resubmitted = await SubmitAsync(manager, release);
+        await app.SetClockAsync(DateTimeOffset.UtcNow);
+
+        var reviewed = Assert.Single(await ReadReviewAsync(admin), r => r.Id == release.Id);
+        Assert.Equal(second, reviewed.SubmittedAt);
+        Assert.Equal(
+            [new MadeRightsDeclaration(firstName, second, 1), new MadeRightsDeclaration(firstName, first, 1)],
+            reviewed.RightsDeclarations);
+    }
+
+    [Fact]
+    public async Task The_Review_list_is_for_the_Admin_only()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+
+        using var response = await member.GetAsync("/api/admin/review");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task The_badge_count_follows_Submit_and_Withdraw()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreateCompleteDraftAsync(manager);
+        var before = await ReadCountAsync(admin);
+
+        using var submitted = await SubmitAsync(manager, release);
+        Assert.Equal(before + 1, await ReadCountAsync(admin));
+
+        using var withdrawn = await WithdrawAsync(manager, release);
+        Assert.Equal(before, await ReadCountAsync(admin));
+    }
+
+    [Fact]
+    public async Task Email_6_tells_the_Admin_what_was_submitted()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var title = $"Keuring {Guid.NewGuid():N}";
+        var release = await CreateCompleteDraftAsync(manager, title);
+
+        using var submitted = await SubmitAsync(manager, release);
+
+        var email = await app.CreateMailPit().WaitForEmailAsync(KleinGeldApp.AdminEmail, title);
+        Assert.Contains("De Inzenders", email.Text);
+        Assert.Contains("Review page", email.Text);
+    }
+
+    [Fact]
+    public async Task The_Admin_gets_no_email_about_their_own_Artist()
+    {
+        using var admin = await app.LoginAsAdminAsync();
+        var title = $"Eigen Werk {Guid.NewGuid():N}";
+        var release = await CreateCompleteDraftAsync(admin, title);
+
+        using var submitted = await SubmitAsync(admin, release);
+
+        Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        await AssertNoEmailAsync(title);
+    }
+
+    [Fact]
+    public async Task A_fellow_manager_submitting_for_an_Artist_the_Admin_manages_sends_no_email()
+    {
+        using var admin = await app.LoginAsAdminAsync();
+        var fellowName = $"Bandlid {Guid.NewGuid():N}";
+        using var fellow = await app.LoginAsNewMemberAsync(fellowName);
+        var title = $"Samen Werk {Guid.NewGuid():N}";
+        var release = await CreateCompleteDraftAsync(admin, title);
+        var candidates = await admin.GetFromJsonAsync<List<ArtistManager>>($"/api/artists/{release.ArtistId}/managers/candidates");
+        using var added = await admin.PostAsJsonAsync(
+            $"/api/artists/{release.ArtistId}/managers",
+            new AddManagerForm { MemberId = candidates!.Single(c => c.Name == fellowName).Id });
+        Assert.Equal(HttpStatusCode.NoContent, added.StatusCode);
+
+        using var submitted = await SubmitAsync(fellow, release);
+
+        Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        await AssertNoEmailAsync(title);
+    }
+
+    // The email goes out before Submit answers, so anything sent is already in MailPit.
+    private async Task AssertNoEmailAsync(string title) =>
+        Assert.Empty(await app.CreateMailPit().SearchAsync(KleinGeldApp.AdminEmail, title));
+
+    [Fact]
+    public async Task The_Admin_link_shows_the_count_on_server_rendered_pages_too()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreateCompleteDraftAsync(manager);
+        using var submitted = await SubmitAsync(manager, release);
+
+        var page = await admin.GetStringAsync("/Account/Manage");
+        var memberPage = await manager.GetStringAsync("/Account/Manage");
+
+        Assert.Contains($"""<span class="review-badge" aria-label="Waiting for review">{await ReadCountAsync(admin)}</span>""", page);
+        Assert.DoesNotContain("review-badge", memberPage);
+    }
+
+    private static async Task<int> ReadCountAsync(HttpClient admin) =>
+        await admin.GetFromJsonAsync<int>("/api/admin/review/count");
+
+    private static async Task<List<ReviewRelease>> ReadReviewAsync(HttpClient admin) =>
+        (await admin.GetFromJsonAsync<List<ReviewRelease>>("/api/admin/review"))!;
+
     private static Task<HttpResponseMessage> WithdrawAsync(HttpClient member, ReleaseDetails release) =>
         member.PostAsync($"/api/releases/{release.Id}/withdraw", null);
 
