@@ -191,6 +191,9 @@ namespace KleinGeld.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateOnly?>("ReleaseDate")
                         .HasColumnType("date");
 

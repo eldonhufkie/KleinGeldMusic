@@ -6,7 +6,7 @@ using SkiaSharp;
 namespace KleinGeld.Api.Tests;
 
 [Collection(KleinGeldAppCollection.Name)]
-public sealed class SubmitReleaseTests(KleinGeldApp app) : IAsyncLifetime
+public sealed partial class SubmitReleaseTests(KleinGeldApp app) : IAsyncLifetime
 {
     private static readonly HttpClient BlobStorage = new();
     private static readonly TimeSpan ConversionTimeout = TimeSpan.FromMinutes(1);

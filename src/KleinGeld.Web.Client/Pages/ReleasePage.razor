@@ -3,6 +3,7 @@
 @inject HttpClient Http
 @inject NavigationManager Navigation
 @inject PlayerService Player
+@inject IReviewCountState ReviewCount
 
 @* A Release as Members see it. Managing Members and the Admin see their unpublished Releases here too. *@
 
@@ -41,6 +42,20 @@ else
         </div>
     </div>
 
+    @if (_release.Stage == ReleaseStage.Submitted)
+    {
+        <AuthorizeView Roles="@Roles.Admin">
+            <p>
+                <button type="button" disabled="@_approving" @onclick="ApproveAsync">Approve</button>
+                Approving Publishes the whole Release to every Member.
+            </p>
+            @if (_problem is not null)
+            {
+                <p role="alert">@_problem</p>
+            }
+        </AuthorizeView>
+    }
+
     <ol class="release-tracks">
         @foreach (var track in _tracks)
         {
@@ -72,6 +87,8 @@ else
     private ReleaseDetails? _release;
     private List<TrackSummary> _tracks = [];
     private bool _failed;
+    private bool _approving;
+    private string? _problem;
 
     private string TotalDuration
     {
@@ -79,6 +96,33 @@ else
         {
             var total = TimeSpan.FromTicks(_tracks.Sum(t => t.Duration?.Ticks ?? 0));
             return total.ToString(total.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
+        }
+    }
+
+    private async Task ApproveAsync()
+    {
+        _approving = true;
+        _problem = null;
+        try
+        {
+            using var response = await Http.PostAsync($"api/admin/review/releases/{Id}/approve", null);
+            if (response.IsSuccessStatusCode)
+            {
+                _release = await response.Content.ReadFromJsonAsync<ReleaseDetails>();
+                await ReviewCount.LoadAsync();
+            }
+            else
+            {
+                _problem = "This Release couldn't be approved. Reload the page to see where it stands.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _problem = "Something went wrong. Try again.";
+        }
+        finally
+        {
+            _approving = false;
         }
     }
 

@@ -28,7 +28,7 @@ else
         @foreach (var release in _releases)
         {
             <li class="join-request">
-                <p><strong>@release.Title</strong> by @release.ArtistName <span class="stage-badge">@release.Type</span></p>
+                <p><a href="releases/@release.Id/@release.Slug"><strong>@release.Title</strong></a> by @release.ArtistName <span class="stage-badge">@release.Type</span></p>
                 <p>
                     Submitted @release.SubmittedAt.ToString("d MMMM yyyy, HH:mm")
                     by @(release.RightsDeclarations[0].MemberName ?? "a former Member"),
