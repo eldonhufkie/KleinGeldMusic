@@ -16,6 +16,7 @@ builder.AddNpgsqlDbContext<KleinGeldDbContext>("kleingeld", settings => settings
 builder.AddAzureBlobServiceClient("blobs");
 builder.Services.AddHostedService<BlobCorsSetup>();
 builder.Services.AddSingleton<BlobLinks>();
+builder.Services.AddSingleton<PlayLinks>();
 builder.Services.AddSingleton<CoverStore>();
 builder.Services.AddSingleton<AudioProbe>();
 builder.Services.AddSingleton<UploadCleanUp>();

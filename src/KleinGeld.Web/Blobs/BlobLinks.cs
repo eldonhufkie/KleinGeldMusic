@@ -33,6 +33,20 @@ internal sealed class BlobLinks(BlobServiceClient blobs, TimeProvider clock, ICo
         return AsSeenByBrowsers(blob.GenerateSasUri(BlobSasPermissions.Read, clock.GetUtcNow() + lifetime));
     }
 
+    /// <summary>A link whose permissions come from the stored access policy <paramref name="policy"/>, so it dies with it.</summary>
+    public Uri ForReading(string container, string blobName, string policy, DateTimeOffset expiresOn)
+    {
+        var blob = blobs.GetBlobContainerClient(container).GetBlobClient(blobName);
+        return AsSeenByBrowsers(blob.GenerateSasUri(new BlobSasBuilder
+        {
+            BlobContainerName = container,
+            BlobName = blobName,
+            Resource = "b",
+            Identifier = policy,
+            ExpiresOn = expiresOn,
+        }));
+    }
+
     public BlobClient Blob(string container, string blobName) =>
         blobs.GetBlobContainerClient(container).GetBlobClient(blobName);
 
