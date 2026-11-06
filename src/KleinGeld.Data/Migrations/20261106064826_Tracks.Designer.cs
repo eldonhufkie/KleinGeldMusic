@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace KleinGeld.Data.Migrations
 {
     [DbContext(typeof(KleinGeldDbContext))]
-    [Migration("20261106064234_Tracks")]
+    [Migration("20261106064826_Tracks")]
     partial class Tracks
     {
         /// <inheritdoc />
@@ -181,6 +181,9 @@ namespace KleinGeld.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("ArtistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CoverId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Description")

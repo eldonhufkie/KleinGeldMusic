@@ -180,6 +180,9 @@ namespace KleinGeld.Data.Migrations
                     b.Property<Guid>("ArtistId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("CoverId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Description")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");

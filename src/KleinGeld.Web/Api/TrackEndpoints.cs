@@ -59,8 +59,8 @@ internal static class TrackEndpoints
                 return refused;
             }
 
-            var link = await links.UploadLinkAsync(AudioContainer, added!.OriginalBlobName);
-            return Results.Created($"/api/tracks?releaseId={id}", new TrackUpload(ToSummary(added), link));
+            var link = await links.ForUploadAsync(AudioContainer, added!.OriginalBlobName, added.Id);
+            return Results.Created($"/api/tracks?releaseId={id}", new TrackUpload(ToSummary(added), link.Url));
         });
 
         api.MapPost("/releases/{id:guid}/tracks/{trackId:guid}/confirm", async (
@@ -93,7 +93,7 @@ internal static class TrackEndpoints
             // The size the browser declared proves nothing, and a SAS link can't limit what is uploaded to it.
             var problem = size > TrackUploadForm.MaxFileSize
                 ? "A Track's file can be at most 500 MB."
-                : await probe.IsAcceptedAudioAsync(links.ServerReadLink(AudioContainer, track.OriginalBlobName))
+                : await probe.IsAcceptedAudioAsync(links.ForServerReading(AudioContainer, track.OriginalBlobName))
                     ? null
                     : "That file isn't audio we accept. Use FLAC, WAV, AIFF, ALAC, MP3 or AAC.";
             if (problem is not null)

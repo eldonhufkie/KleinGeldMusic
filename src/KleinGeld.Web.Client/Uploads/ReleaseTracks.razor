@@ -1,4 +1,3 @@
-@implements IAsyncDisposable
 @inject HttpClient Http
 @inject IJSRuntime JS
 
@@ -36,15 +35,12 @@
     [Parameter, EditorRequired]
     public Guid ReleaseId { get; set; }
 
-    private sealed record ChosenFile(string Name, long Size);
-
     private sealed record Problem(string? Detail);
 
     private readonly Dictionary<Guid, int> _progress = [];
     private readonly List<string> _messages = [];
     private List<TrackSummary> _tracks = [];
     private ElementReference _input;
-    private IJSObjectReference? _module;
     private bool _busy;
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
@@ -65,15 +61,14 @@
     {
         _busy = true;
         _messages.Clear();
-        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/KleinGeld.Web.Client/blob-upload.js");
-        var files = await _module.InvokeAsync<List<ChosenFile>>("chosenFiles", _input);
         try
         {
+            var files = await BlobUpload.ChosenFilesAsync(JS, _input);
             for (var index = 0; index < files.Count; index++)
             {
                 await UploadAsync(index, files[index]);
             }
-            await _module.InvokeVoidAsync("clear", _input);
+            await BlobUpload.ClearAsync(JS, _input);
         }
         catch (HttpRequestException)
         {
@@ -85,7 +80,7 @@
         }
     }
 
-    private async Task UploadAsync(int index, ChosenFile file)
+    private async Task UploadAsync(int index, BlobUpload.ChosenFile file)
     {
         using var requested = await Http.PostAsJsonAsync(
             $"api/releases/{ReleaseId}/tracks", new TrackUploadForm { FileName = file.Name, Size = file.Size });
@@ -100,12 +95,11 @@
         _progress[upload.Track.Id] = 0;
         StateHasChanged();
 
-        using var progress = DotNetObjectReference.Create(new UploadProgress(percent =>
+        var uploaded = await BlobUpload.SendAsync(JS, _input, upload.UploadLink, percent =>
         {
             _progress[upload.Track.Id] = percent;
             StateHasChanged();
-        }));
-        var uploaded = await _module!.InvokeAsync<bool>("upload", TimeSpan.FromHours(2), [_input, index, upload.UploadLink, progress]);
+        }, index);
         _progress.Remove(upload.Track.Id);
 
         if (uploaded)
@@ -124,7 +118,7 @@
         await LoadAsync();
     }
 
-    private async Task ReportAsync(ChosenFile file, HttpResponseMessage response)
+    private async Task ReportAsync(BlobUpload.ChosenFile file, HttpResponseMessage response)
     {
         var problem = response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.UnprocessableEntity
             ? await response.Content.ReadFromJsonAsync<Problem>()
@@ -151,23 +145,4 @@
         }
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        if (_module is not null)
-        {
-            try
-            {
-                await _module.DisposeAsync();
-            }
-            catch (JSDisconnectedException)
-            {
-            }
-        }
-    }
-
-    private sealed class UploadProgress(Action<int> report)
-    {
-        [JSInvokable]
-        public void OnProgress(int percent) => report(percent);
-    }
 }
