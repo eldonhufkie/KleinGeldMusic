@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject HttpClient Http
 @inject NavigationManager Navigation
+@inject IManagedArtistsState ManagedArtists
 
 @* One Artist in My Artists: its Releases and managers. The API redirects an old slug; the address follows here. *@
 
@@ -43,9 +44,28 @@ else
     <ul class="artists">
         @foreach (var manager in _artist.Managers)
         {
-            <li>@manager.Name</li>
+            <li>
+                @manager.Name
+                <button type="button" disabled="@_changingManagers" @onclick="() => StopManagingAsync(manager)">Stop managing</button>
+            </li>
         }
     </ul>
+    @if (_refusal is not null)
+    {
+        <p role="alert">@_refusal</p>
+    }
+
+    <form class="artist-form" @onsubmit="AddManagerAsync">
+        <label for="new-manager">Add a manager</label>
+        <select id="new-manager" @bind="_pickedMemberId">
+            <option value="">Pick a Member…</option>
+            @foreach (var candidate in _candidates)
+            {
+                <option value="@candidate.Id">@candidate.Name</option>
+            }
+        </select>
+        <button type="submit" disabled="@(_changingManagers || _pickedMemberId is null)">Add manager</button>
+    </form>
 
     <h2>Rename</h2>
     <EditForm Model="_form" OnValidSubmit="RenameAsync" class="artist-form">
@@ -68,6 +88,10 @@ else
 
     private readonly ArtistForm _form = new();
     private ManagedArtist? _artist;
+    private IReadOnlyList<ArtistManager> _candidates = [];
+    private Guid? _pickedMemberId;
+    private bool _changingManagers;
+    private string? _refusal;
     private bool _renaming;
     private bool _failed;
 
@@ -78,6 +102,7 @@ else
         try
         {
             _artist = await Http.GetFromJsonAsync<ManagedArtist>($"api/my-artists/{Id}/{Slug}");
+            _candidates = (await Http.GetFromJsonAsync<List<ArtistManager>>($"api/artists/{Id}/managers/candidates"))!;
             _form.Name = _artist!.Name;
             if (_artist.Slug != Slug)
             {
@@ -93,6 +118,69 @@ else
             _failed = true;
         }
     }
+
+    private async Task AddManagerAsync()
+    {
+        var form = new AddManagerForm { MemberId = _pickedMemberId!.Value };
+        await ChangeManagersAsync(async () =>
+        {
+            using var response = await Http.PostAsJsonAsync($"api/artists/{Id}/managers", form);
+            _failed = !response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+            {
+                _pickedMemberId = null;
+                await LoadAsync();
+            }
+        });
+    }
+
+    private Task StopManagingAsync(ArtistManager manager) => ChangeManagersAsync(async () =>
+    {
+        using var response = await Http.DeleteAsync($"api/artists/{Id}/managers/{manager.Id}");
+        if (response.StatusCode == HttpStatusCode.Conflict)
+        {
+            _refusal = (await response.Content.ReadFromJsonAsync<Refusal>())?.Detail;
+        }
+        else if (response.IsSuccessStatusCode)
+        {
+            // Stopping themselves takes this page away from the Member, and perhaps My Artists too.
+            await ManagedArtists.LoadAsync();
+            var managed = await Http.GetFromJsonAsync<List<ArtistSummary>>("api/my-artists");
+            if (managed!.Any(a => a.Id == Id))
+            {
+                await LoadAsync();
+            }
+            else
+            {
+                Navigation.NavigateTo("my-artists");
+            }
+        }
+        else
+        {
+            _failed = true;
+        }
+    });
+
+    private async Task ChangeManagersAsync(Func<Task> change)
+    {
+        _changingManagers = true;
+        _failed = false;
+        _refusal = null;
+        try
+        {
+            await change();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _changingManagers = false;
+        }
+    }
+
+    private sealed record Refusal(string? Detail);
 
     private async Task RenameAsync()
     {
