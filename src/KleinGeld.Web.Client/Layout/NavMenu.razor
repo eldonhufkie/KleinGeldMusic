@@ -1,30 +1,53 @@
 @implements IDisposable
 @inject IManagedArtistsState ManagedArtists
 @inject IReviewCountState ReviewCount
+@inject NavigationManager Navigation
+
+@* Both navs are always rendered and app.css shows one: the sidebar, or below 700px the tab bar. *@
 
 <nav class="sidebar" aria-label="Main">
     <div class="sidebar-logo">KleinGeld Music</div>
     <NavLink href="" Match="NavLinkMatch.All">Home</NavLink>
-    @if (ManagedArtists.ManagesArtist)
-    {
-        <NavLink href="my-artists">My Artists</NavLink>
-    }
-    <AuthorizeView Roles="@Roles.Admin">
-        <NavLink href="admin">
-            Admin
-            @if (ReviewCount.Count > 0)
-            {
-                <span class="review-badge" aria-label="Waiting for review">@ReviewCount.Count</span>
-            }
-        </NavLink>
-    </AuthorizeView>
+    @MemberLinks
+</nav>
+
+<nav class="tab-bar" aria-label="Tabs">
+    <NavLink href="" Match="NavLinkMatch.All">Home</NavLink>
+    @* Keyed on the navigation count: a new element is a closed one, so More folds away once a link in it is followed. *@
+    <details class="tab-more" @key="_navigations">
+        <summary>More</summary>
+        <div class="tab-more-sheet">
+            @MemberLinks
+            <ProfileMenu Open="true" />
+        </div>
+    </details>
 </nav>
 
 @code {
+    private int _navigations;
+
+    private RenderFragment MemberLinks =>
+        @<text>
+            @if (ManagedArtists.ManagesArtist)
+            {
+                <NavLink href="my-artists">My Artists</NavLink>
+            }
+            <AuthorizeView Roles="@Roles.Admin">
+                <NavLink href="admin">
+                    Admin
+                    @if (ReviewCount.Count > 0)
+                    {
+                        <span class="review-badge" aria-label="Waiting for review">@ReviewCount.Count</span>
+                    }
+                </NavLink>
+            </AuthorizeView>
+        </text>;
+
     protected override async Task OnInitializedAsync()
     {
         ManagedArtists.Changed += OnChanged;
         ReviewCount.Changed += OnChanged;
+        Navigation.LocationChanged += OnLocationChanged;
         try
         {
             await ManagedArtists.LoadAsync();
@@ -38,9 +61,16 @@
 
     private void OnChanged() => StateHasChanged();
 
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        _navigations++;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     public void Dispose()
     {
         ManagedArtists.Changed -= OnChanged;
         ReviewCount.Changed -= OnChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
     }
 }
