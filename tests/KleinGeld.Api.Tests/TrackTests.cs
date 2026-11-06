@@ -210,6 +210,77 @@ public sealed class TrackTests(KleinGeldApp app)
         Assert.Equal("Zonsopgang", Assert.Single(await ListTracksAsync(manager, release)).Title);
     }
 
+    [Fact]
+    public async Task The_first_audio_file_fills_the_empty_details_of_a_Draft()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager, new ReleaseForm { Type = ReleaseType.Album });
+
+        await UploadAsync(manager, release, "tagged.mp3");
+
+        var filled = await ReadReleaseAsync(manager, release);
+        Assert.Equal("Avondrood", filled.Title);
+        Assert.Equal("avondrood", filled.Slug);
+        Assert.Equal(new DateOnly(2019, 1, 1), filled.ReleaseDate);
+        Assert.Equal("Polder-pop", filled.Genre);
+    }
+
+    [Fact]
+    public async Task Tags_never_overwrite_details_that_were_typed()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager, new ReleaseForm
+        {
+            Title = "Mijn Eigen Titel",
+            Type = ReleaseType.Album,
+            ReleaseDate = new DateOnly(2026, 3, 4),
+            Genre = "Jazz",
+        });
+
+        await UploadAsync(manager, release, "tagged.mp3");
+
+        var kept = await ReadReleaseAsync(manager, release);
+        Assert.Equal("Mijn Eigen Titel", kept.Title);
+        Assert.Equal(release.Slug, kept.Slug);
+        Assert.Equal(new DateOnly(2026, 3, 4), kept.ReleaseDate);
+        Assert.Equal("Jazz", kept.Genre);
+    }
+
+    [Fact]
+    public async Task Only_the_first_audio_file_fills_the_details_of_a_Draft()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager, new ReleaseForm { Type = ReleaseType.Album });
+
+        await UploadAsync(manager, release, "tone.mp3");
+        await UploadAsync(manager, release, "tagged.mp3");
+
+        var after = await ReadReleaseAsync(manager, release);
+        Assert.Equal("", after.Title);
+        Assert.Null(after.ReleaseDate);
+        Assert.Null(after.Genre);
+        Assert.Equal(["tone", "Zonsopgang"], (await ListTracksAsync(manager, release)).Select(t => t.Title));
+    }
+
+    private static async Task<HttpResponseMessage> UploadAsync(HttpClient manager, ReleaseDetails release, string fixture)
+    {
+        var file = await ReadFixtureAsync(fixture);
+        var upload = await RequestUploadAsync(manager, release, fixture, file.Length);
+        await PutBlobAsync(upload.UploadLink, file);
+        var confirmed = await ConfirmAsync(manager, release, upload);
+        Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
+        return confirmed;
+    }
+
+    /// <summary>Reads a Release whose slug may have changed since <paramref name="release"/> was fetched.</summary>
+    private static async Task<ReleaseDetails> ReadReleaseAsync(HttpClient manager, ReleaseDetails release)
+    {
+        using var response = await manager.GetAsync($"/api/releases/{release.Id}/{release.Slug}");
+        return response.StatusCode == HttpStatusCode.Redirect
+            ? (await manager.GetFromJsonAsync<ReleaseDetails>(response.Headers.Location))!
+            : (await response.Content.ReadFromJsonAsync<ReleaseDetails>())!;
+    }
+
     /// <summary>The blobs stored for a Track, as blob storage itself reports them.</summary>
     private async Task<List<string>> BlobsOfAsync(TrackUpload upload)
     {
@@ -225,16 +296,18 @@ public sealed class TrackTests(KleinGeldApp app)
     private static Task<byte[]> ReadFixtureAsync(string name) =>
         File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
 
-    private static async Task<ReleaseDetails> CreateDraftAsync(HttpClient manager)
+    private static Task<ReleaseDetails> CreateDraftAsync(HttpClient manager) => CreateDraftAsync(manager, new ReleaseForm
+    {
+        Title = "Eerste Plaat",
+        Type = ReleaseType.Album,
+        ReleaseDate = new DateOnly(2026, 1, 1),
+    });
+
+    private static async Task<ReleaseDetails> CreateDraftAsync(HttpClient manager, ReleaseForm form)
     {
         using var artistResponse = await manager.PostAsJsonAsync("/api/artists", new ArtistForm { Name = "De Testers" });
         var artist = await artistResponse.Content.ReadFromJsonAsync<ArtistSummary>();
-        using var response = await manager.PostAsJsonAsync($"/api/artists/{artist!.Id}/releases", new ReleaseForm
-        {
-            Title = "Eerste Plaat",
-            Type = ReleaseType.Album,
-            ReleaseDate = new DateOnly(2026, 1, 1),
-        });
+        using var response = await manager.PostAsJsonAsync($"/api/artists/{artist!.Id}/releases", form);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<ReleaseDetails>())!;
     }

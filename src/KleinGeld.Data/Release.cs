@@ -18,8 +18,8 @@ public sealed class Release
 
     public required ReleaseType Type { get; set; }
 
-    /// <summary>Display and sorting only, so it may be in the past.</summary>
-    public required DateOnly ReleaseDate { get; set; }
+    /// <summary>Display and sorting only, so it may be in the past. Null while a Draft leaves it blank.</summary>
+    public DateOnly? ReleaseDate { get; set; }
 
     public string? Description { get; set; }
 

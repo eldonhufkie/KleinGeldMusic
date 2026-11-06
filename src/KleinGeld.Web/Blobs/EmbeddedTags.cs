@@ -5,9 +5,9 @@ using KleinGeld.Web.Api;
 namespace KleinGeld.Web.Blobs;
 
 /// <summary>What an audio file says about itself. Blank tags are null.</summary>
-internal sealed record EmbeddedTags(string? Title)
+internal sealed record EmbeddedTags(string? Title, string? Album, DateOnly? Date, string? Genre)
 {
-    public static readonly EmbeddedTags None = new((string?)null);
+    public static readonly EmbeddedTags None = new(null, null, null, null);
 }
 
 /// <summary>
@@ -24,7 +24,12 @@ internal sealed class TagReader(BlobLinks links, ILogger<TagReader> logger)
         {
             await using var stream = await links.Blob(TrackEndpoints.AudioContainer, blobName).OpenReadAsync();
             using var file = TagLib.File.Create(new BlobFile(blobName, stream), MimeTypeOf(format), TagLib.ReadStyle.None);
-            return new EmbeddedTags(Clean(file.Tag.Title, ReleaseForm.TitleMaxLength));
+            return new EmbeddedTags(
+                Clean(file.Tag.Title, ReleaseForm.TitleMaxLength),
+                Clean(file.Tag.Album, ReleaseForm.TitleMaxLength),
+                // Most files hold a year at best, so the date is the first day of it.
+                file.Tag.Year is >= 1 and <= 9999 ? new DateOnly((int)file.Tag.Year, 1, 1) : null,
+                Clean(file.Tag.FirstGenre, ReleaseForm.GenreMaxLength));
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {

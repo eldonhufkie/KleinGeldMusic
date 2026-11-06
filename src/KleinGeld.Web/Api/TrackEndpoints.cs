@@ -104,10 +104,25 @@ internal static class TrackEndpoints
             }
 
             var tags = await tagReader.ReadAsync(track.OriginalBlobName, format);
-            track.Title = tags.Title ?? track.Title;
-            track.Status = TrackStatus.Converting;
-            await db.SaveChangesAsync();
-            return Results.Ok(ToSummary(track));
+            Track? confirmed = null;
+            var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+            {
+                confirmed = release.Tracks.SingleOrDefault(t => t.Id == trackId);
+                if (confirmed is null)
+                {
+                    return Results.NotFound();
+                }
+
+                confirmed.Title = tags.Title ?? confirmed.Title;
+                confirmed.Status = TrackStatus.Converting;
+                if (confirmed.Position == 1)
+                {
+                    PreFill(release, tags);
+                }
+                await db.SaveChangesAsync();
+                return null;
+            });
+            return refused ?? Results.Ok(ToSummary(confirmed!));
         });
 
         api.MapDelete("/releases/{id:guid}/tracks/{trackId:guid}", (
@@ -185,6 +200,17 @@ internal static class TrackEndpoints
             }
             return refused;
         });
+
+    private static void PreFill(Release release, EmbeddedTags tags)
+    {
+        if (release.Title.Length == 0 && tags.Album is not null)
+        {
+            release.Title = tags.Album;
+            release.Slug = Slugs.From(release.Title);
+        }
+        release.ReleaseDate ??= tags.Date;
+        release.Genre ??= tags.Genre;
+    }
 
     private static string TitleFrom(string fileName)
     {

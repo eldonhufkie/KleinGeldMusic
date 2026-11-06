@@ -58,12 +58,9 @@ public sealed class ReleaseTests(KleinGeldApp app)
 
     public static TheoryData<object> InvalidForms => new()
     {
-        new { Type = "Album", ReleaseDate = "2026-01-01" },
-        new { Title = "   ", Type = "Album", ReleaseDate = "2026-01-01" },
         new { Title = "Geen Type", ReleaseDate = "2026-01-01" },
         new { Title = "Fout Type", Type = "Compilation", ReleaseDate = "2026-01-01" },
         new { Title = "Fout Getal", Type = 7, ReleaseDate = "2026-01-01" },
-        new { Title = "Geen Datum", Type = "Album" },
         new { Title = "Te Lang", Type = "Album", ReleaseDate = "2026-01-01", Description = new string('x', 2001) },
     };
 

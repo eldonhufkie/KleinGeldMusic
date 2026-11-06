@@ -28,7 +28,6 @@ internal static class ReleaseEndpoints
                 Title = "",
                 Slug = "",
                 Type = form.Type!.Value,
-                ReleaseDate = form.ReleaseDate!.Value,
             };
             release.Fill(form);
             db.Releases.Add(release);
@@ -104,10 +103,10 @@ internal static class ReleaseEndpoints
 
     private static void Fill(this Release release, ReleaseForm form)
     {
-        release.Title = form.Title.Trim();
+        release.Title = form.Title?.Trim() ?? "";
         release.Slug = Slugs.From(release.Title);
         release.Type = form.Type!.Value;
-        release.ReleaseDate = form.ReleaseDate!.Value;
+        release.ReleaseDate = form.ReleaseDate;
         release.Description = NullIfBlank(form.Description);
         release.Genre = NullIfBlank(form.Genre);
     }
