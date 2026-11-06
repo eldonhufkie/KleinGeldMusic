@@ -1,4 +1,5 @@
 using KleinGeld.Web.Client.Artists;
+using KleinGeld.Web.Client.Player;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
@@ -12,5 +13,7 @@ builder.Services.AddScoped(_ => new HttpClient { BaseAddress = new Uri(builder.H
 
 builder.Services.AddScoped<IManagedArtistsState, ManagedArtistsState>();
 builder.Services.AddScoped<IReviewCountState, ReviewCountState>();
+builder.Services.AddScoped<IPlayLinkSource, ApiPlayLinkSource>();
+builder.Services.AddPlayer();
 
 await builder.Build().RunAsync();

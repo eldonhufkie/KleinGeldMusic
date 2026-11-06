@@ -72,6 +72,8 @@ else
 
     @if (_release is not null)
     {
+        <p><a href="releases/@_release.Id/@_release.Slug">Open the Release page</a></p>
+
         @if (_release.Stage is ReleaseStage.Draft or ReleaseStage.Rejected)
         {
             <h2>Submit</h2>

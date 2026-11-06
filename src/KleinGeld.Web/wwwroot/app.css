@@ -240,3 +240,64 @@ body:has(.app-shell) #app-loading {
     margin-left: 0.5rem;
     padding: 0 0.25rem;
 }
+
+.player-bar {
+    align-items: center;
+    background: #f4f4f4;
+    border-top: 1px solid #ddd;
+    bottom: 0;
+    box-sizing: border-box;
+    display: flex;
+    flex-wrap: wrap;
+    font-family: system-ui, sans-serif;
+    gap: 0.75rem;
+    left: 0;
+    padding: 0.5rem 1rem;
+    position: fixed;
+    width: 100%;
+}
+
+body:has(.player-bar) .app-main {
+    padding-bottom: 6rem;
+}
+
+.player-notice {
+    flex-basis: 100%;
+    margin: 0;
+}
+
+.player-title {
+    font-weight: 600;
+}
+
+.player-seek {
+    flex: 1;
+    min-width: 8rem;
+}
+
+.release-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+}
+
+.release-header .cover-art {
+    width: 16rem;
+}
+
+.release-tracks {
+    list-style: none;
+    padding: 0;
+}
+
+.release-tracks li {
+    align-items: center;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.375rem 0;
+}
+
+.release-track-title {
+    flex: 1;
+}
