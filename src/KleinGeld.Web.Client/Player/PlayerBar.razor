@@ -32,6 +32,10 @@
                    value="@((int)(_seekingTo ?? Player.Position).TotalSeconds)"
                    @oninput="ShowSeeking" @onchange="SeekAsync" />
             <span class="player-time">@Format(Player.Duration)</span>
+            <button type="button" class="player-step" aria-pressed="@(Player.IsMuted ? "true" : "false")"
+                    @onclick="Player.ToggleMuteAsync">Mute</button>
+            <input type="range" class="player-volume" aria-label="Volume" min="0" max="100" step="1"
+                   value="@((int)Math.Round(Player.Volume * 100))" @oninput="SetVolumeAsync" />
             <button type="button" class="player-step" aria-pressed="@(Player.Shuffle ? "true" : "false")"
                     @onclick="() => Player.SetShuffle(!Player.Shuffle)">Shuffle</button>
             <button type="button" class="player-step" @onclick="NextRepeat">Repeat: @Player.Repeat.ToString().ToLowerInvariant()</button>
@@ -76,6 +80,7 @@
         if (firstRender)
         {
             await Audio.AttachAsync(_element);
+            await Player.RestoreAsync();
         }
     }
 
@@ -99,6 +104,9 @@
         await Player.SeekAsync(Seconds(e));
         _seekingTo = null;
     }
+
+    private Task SetVolumeAsync(ChangeEventArgs e) =>
+        Player.SetVolumeAsync(double.Parse(e.Value!.ToString()!, System.Globalization.CultureInfo.InvariantCulture) / 100);
 
     private static TimeSpan Seconds(ChangeEventArgs e) =>
         TimeSpan.FromSeconds(double.Parse(e.Value!.ToString()!, System.Globalization.CultureInfo.InvariantCulture));

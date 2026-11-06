@@ -25,6 +25,14 @@ public interface IAudioElement
 
     Task SeekAsync(TimeSpan position);
 
+    /// <summary>Loads <paramref name="source"/> and plays it from <paramref name="position"/>.</summary>
+    Task PlayFromAsync(string source, TimeSpan position);
+
+    /// <summary>Sets the loudness, from 0 to 1.</summary>
+    Task SetVolumeAsync(double volume);
+
+    Task SetMutedAsync(bool muted);
+
     /// <summary>Puts a Track on the lock screen and the browser's media controls.</summary>
     Task ShowMetadataAsync(MediaMetadata metadata);
 }

@@ -274,6 +274,10 @@ body:has(.player-bar) .app-main {
     font-weight: 600;
 }
 
+.player-volume {
+    width: 6rem;
+}
+
 .player-seek {
     flex: 1;
     min-width: 8rem;
@@ -549,6 +553,7 @@ body:has(.player-bar) .app-main {
     .player-title,
     .player-time,
     .player-seek,
+    .player-volume,
     .player-step,
     .queue-panel {
         display: none;
@@ -599,6 +604,7 @@ body:has(.player-bar) .app-main {
     }
 
     .player-full .player-time,
+    .player-full .player-volume,
     .player-full .player-step {
         display: inline;
     }
