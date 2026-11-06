@@ -1,13 +1,17 @@
 using System.Security.Claims;
 using KleinGeld.Contracts;
 using KleinGeld.Data;
+using KleinGeld.Web.Blobs;
 using Microsoft.EntityFrameworkCore;
 
 namespace KleinGeld.Web.Api;
 
 internal static class ArtistEndpoints
 {
-    /// <summary>Endpoints for creating Artists and for the My Artists pages of the Members who manage them.</summary>
+    /// <summary>How many Artists the grid loads at a time.</summary>
+    private const int LoadSize = 48;
+
+    /// <summary>Endpoints for creating and browsing Artists and for the My Artists pages of their managers.</summary>
     public static void MapArtistEndpoints(this RouteGroupBuilder api)
     {
         api.MapPost("/artists", async (ArtistForm form, ClaimsPrincipal caller, KleinGeldDbContext db) =>
@@ -41,21 +45,83 @@ internal static class ArtistEndpoints
             return Results.Ok(new ArtistSummary(artist.Id, artist.Name, artist.Slug));
         });
 
-        api.MapGet("/artists/{id:guid}/{slug?}", async (Guid id, string? slug, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        // The grid is a listener's view, so it's the same for managers and the Admin. Sorted on the slug, which is
+        // already lower-cased and free of accents, so A–Z doesn't depend on the database's collation.
+        api.MapGet("/artists", async (int? skip, KleinGeldDbContext db, CoverStore covers) =>
+        {
+            var artists = await db.Artists
+                .WithPublishedRelease()
+                .OrderBy(a => a.Slug)
+                .ThenBy(a => a.Id)
+                .Skip(Math.Max(skip ?? 0, 0))
+                .Take(LoadSize + 1)
+                .Select(a => new
+                {
+                    a.Id,
+                    a.Name,
+                    a.Slug,
+                    Newest = a.Releases.AsQueryable()
+                        .Where(Visibility.IsPublished)
+                        .OrderByDescending(r => r.ReleaseDate)
+                        .ThenByDescending(r => r.Id)
+                        .Select(r => new { r.Id, r.CoverId })
+                        .First(),
+                })
+                .ToListAsync();
+
+            var cards = artists
+                .Take(LoadSize)
+                .Select(a => new ArtistCard(
+                    a.Id,
+                    a.Name,
+                    a.Slug,
+                    a.Newest.CoverId is { } coverId ? covers.LinksTo(a.Newest.Id, coverId) : null))
+                .ToList();
+            return new ArtistList(cards, artists.Count > LoadSize);
+        });
+
+        // Managers and the Admin may open an Artist nobody else can see yet, but what they find is what a listener
+        // would: only Published Releases. Their other Releases are on the My Artists page.
+        api.MapGet("/artists/{id:guid}/{slug?}", async (Guid id, string? slug, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers) =>
         {
             var artist = await db.Artists
                 .Where(a => a.Id == id)
                 .VisibleTo(caller)
-                .Select(a => new ArtistSummary(a.Id, a.Name, a.Slug))
+                .Select(a => new
+                {
+                    a.Id,
+                    a.Name,
+                    a.Slug,
+                    Releases = a.Releases.AsQueryable()
+                        .Where(Visibility.IsPublished)
+                        .OrderByDescending(r => r.ReleaseDate)
+                        .ThenByDescending(r => r.Id)
+                        .ToList(),
+                })
                 .SingleOrDefaultAsync();
 
             if (artist is null)
             {
                 return Results.NotFound();
             }
-            return slug == artist.Slug
-                ? Results.Ok(artist)
-                : Results.Redirect($"/api/artists/{artist.Id}/{artist.Slug}");
+            if (slug != artist.Slug)
+            {
+                return Results.Redirect($"/api/artists/{artist.Id}/{artist.Slug}");
+            }
+
+            List<ArtistRelease> Section(ReleaseType type) => artist.Releases
+                .Where(r => r.Type == type)
+                .Select(r => ToArtistRelease(r, covers))
+                .ToList();
+
+            return Results.Ok(new ArtistDetails(
+                artist.Id,
+                artist.Name,
+                artist.Slug,
+                artist.Releases.FirstOrDefault() is { } newest ? ToArtistRelease(newest, covers) : null,
+                Section(ReleaseType.Album),
+                Section(ReleaseType.EP),
+                Section(ReleaseType.Single)));
         });
 
         api.MapGet("/my-artists", async (ClaimsPrincipal caller, KleinGeldDbContext db) =>
@@ -147,6 +213,13 @@ internal static class ArtistEndpoints
                 return Task.FromResult(Results.NoContent());
             }));
     }
+
+    private static ArtistRelease ToArtistRelease(Release release, CoverStore covers) => new(
+        release.Id,
+        release.Title,
+        release.Slug,
+        release.ReleaseDate,
+        release.CoverId is { } coverId ? covers.LinksTo(release.Id, coverId) : null);
 
     /// <summary>
     /// Changes an Artist's managers while holding a lock on the Artist, so that concurrent changes can't get past

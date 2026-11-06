@@ -1,7 +1,9 @@
+using KleinGeld.Contracts;
 using KleinGeld.Data;
 using KleinGeld.Web.Blobs;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace KleinGeld.Web.Testing;
 
@@ -36,6 +38,28 @@ internal static class TestingEndpoints
         testing.MapPost("/upload-clean-up", async (UploadCleanUp cleanUp) =>
         {
             await cleanUp.RunAsync();
+            return Results.NoContent();
+        });
+
+        // Going through approval takes seconds per Release, too slow for a list longer than one load.
+        testing.MapPost("/published-artists", async (KleinGeldDbContext db, [FromBody] string[] names) =>
+        {
+            var manager = await db.Users.FirstAsync();
+            foreach (var name in names)
+            {
+                var artist = new Artist { Name = name, Slug = Slugs.From(name), Managers = [manager] };
+                artist.Releases.Add(new Release
+                {
+                    Title = name,
+                    Slug = Slugs.From(name),
+                    Type = ReleaseType.Single,
+                    ReleaseDate = new DateOnly(2026, 1, 1),
+                    Stage = ReleaseStage.Published,
+                });
+                db.Artists.Add(artist);
+            }
+
+            await db.SaveChangesAsync();
             return Results.NoContent();
         });
 
