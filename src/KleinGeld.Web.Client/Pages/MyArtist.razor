@@ -1,0 +1,115 @@
+@page "/my-artists/{Id:guid}/{Slug?}"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+@* One Artist in My Artists: its Releases and managers. The API redirects an old slug; the address follows here. *@
+
+<PageTitle>@(_artist?.Name ?? "My Artists") · KleinGeld Music</PageTitle>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+
+@if (_artist is null)
+{
+    <p>@(_failed ? "" : "Loading…")</p>
+}
+else
+{
+    <h1>@_artist.Name</h1>
+
+    <h2>Releases</h2>
+    @if (_artist.Releases.Count == 0)
+    {
+        <p>No Releases yet.</p>
+    }
+    else
+    {
+        <ul class="artists">
+            @foreach (var release in _artist.Releases)
+            {
+                <li>@release.Title</li>
+            }
+        </ul>
+    }
+
+    <h2>Managers</h2>
+    <ul class="artists">
+        @foreach (var manager in _artist.Managers)
+        {
+            <li>@manager.Name</li>
+        }
+    </ul>
+
+    <h2>Rename</h2>
+    <EditForm Model="_form" OnValidSubmit="RenameAsync" class="artist-form">
+        <DataAnnotationsValidator />
+
+        <label for="artist-name">Name</label>
+        <InputText id="artist-name" @bind-Value="_form.Name" maxlength="@ArtistForm.NameMaxLength" />
+        <ValidationMessage For="() => _form.Name" />
+
+        <button type="submit" disabled="@_renaming">@(_renaming ? "Saving…" : "Save name")</button>
+    </EditForm>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [Parameter]
+    public string? Slug { get; set; }
+
+    private readonly ArtistForm _form = new();
+    private ManagedArtist? _artist;
+    private bool _renaming;
+    private bool _failed;
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _artist = await Http.GetFromJsonAsync<ManagedArtist>($"api/my-artists/{Id}/{Slug}");
+            _form.Name = _artist!.Name;
+            if (_artist.Slug != Slug)
+            {
+                Navigation.NavigateTo($"my-artists/{Id}/{_artist.Slug}", replace: true);
+            }
+        }
+        catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.NotFound)
+        {
+            Navigation.NotFound();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+
+    private async Task RenameAsync()
+    {
+        _renaming = true;
+        _failed = false;
+        try
+        {
+            using var response = await Http.PutAsJsonAsync($"api/artists/{Id}", _form);
+            _failed = !response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _renaming = false;
+        }
+    }
+}

@@ -41,6 +41,80 @@ public sealed class ArtistTests(KleinGeldApp app)
         Assert.Equal(artist, await admin.GetFromJsonAsync<ArtistSummary>(publicPage));
     }
 
+    [Fact]
+    public async Task After_a_rename_an_outdated_slug_redirects_to_the_current_one()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+        var artist = await CreateArtistAsync(member, "Oude Naam");
+
+        using var renamed = await member.PutAsJsonAsync($"/api/artists/{artist.Id}", new ArtistForm { Name = "Nieuwe Naam" });
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+
+        using var followed = await member.GetAsync($"/api/my-artists/{artist.Id}/oude-naam");
+        Assert.Equal($"/api/my-artists/{artist.Id}/nieuwe-naam", followed.RequestMessage!.RequestUri!.AbsolutePath);
+        var page = await followed.Content.ReadFromJsonAsync<ManagedArtist>();
+        Assert.Equal(("Nieuwe Naam", "nieuwe-naam"), (page!.Name, page.Slug));
+
+        using var followedPublic = await member.GetAsync($"/api/artists/{artist.Id}/oude-naam");
+        Assert.Equal($"/api/artists/{artist.Id}/nieuwe-naam", followedPublic.RequestMessage!.RequestUri!.AbsolutePath);
+    }
+
+    [Fact]
+    public async Task Only_a_managing_Member_renames_an_Artist()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var otherMember = await app.LoginAsNewMemberAsync();
+        var artist = await CreateArtistAsync(manager, "Van Mij");
+
+        using var response = await otherMember.PutAsJsonAsync($"/api/artists/{artist.Id}", new ArtistForm { Name = "Van Mij Nu" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var page = await manager.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+        Assert.Equal("Van Mij", page!.Name);
+    }
+
+    [Fact]
+    public async Task My_Artists_lists_only_the_Artists_a_Member_manages_and_shows_once_they_manage_one()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+        using var otherMember = await app.LoginAsNewMemberAsync();
+        await CreateArtistAsync(otherMember, "Iemand Anders");
+
+        var before = await member.GetFromJsonAsync<MeResponse>("/api/me");
+        var zebra = await CreateArtistAsync(member, "Zebra");
+        var appel = await CreateArtistAsync(member, "Appel");
+        var after = await member.GetFromJsonAsync<MeResponse>("/api/me");
+
+        Assert.False(before!.ManagesArtist);
+        Assert.True(after!.ManagesArtist);
+        Assert.Equal([appel, zebra], await member.GetFromJsonAsync<List<ArtistSummary>>("/api/my-artists"));
+    }
+
+    [Fact]
+    public async Task The_sidebar_on_the_account_pages_shows_My_Artists_only_to_managing_Members()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+
+        var before = await member.GetStringAsync("/Account/Manage");
+        await CreateArtistAsync(member, "Op De Kaart");
+        var after = await member.GetStringAsync("/Account/Manage");
+
+        Assert.DoesNotContain("My Artists", before);
+        Assert.Contains("My Artists", after);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task An_Artist_needs_a_name(string name)
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+
+        using var response = await member.PostAsJsonAsync("/api/artists", new ArtistForm { Name = name });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     private static async Task<ArtistSummary> CreateArtistAsync(HttpClient member, string name)
     {
         using var response = await member.PostAsJsonAsync("/api/artists", new ArtistForm { Name = name });

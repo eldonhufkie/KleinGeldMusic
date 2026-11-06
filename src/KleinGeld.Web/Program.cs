@@ -20,6 +20,9 @@ builder.Services.AddHealthChecks()
 builder.AddMemberAuthentication();
 builder.AddEmailSender();
 
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IManagedArtistsState, ServerManagedArtistsState>();
+
 builder.Services.AddProblemDetails();
 // Checks API request bodies against their DataAnnotations and answers 400 with the errors.
 builder.Services.AddValidation();

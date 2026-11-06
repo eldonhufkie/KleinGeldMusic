@@ -23,6 +23,48 @@ internal static class ArtistEndpoints
                 new ArtistSummary(artist.Id, artist.Name, artist.Slug));
         });
 
+        api.MapPut("/artists/{id:guid}", async (Guid id, ArtistForm form, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        {
+            var artist = await db.Artists
+                .Where(a => a.Id == id)
+                .ManagedBy(caller.MemberId())
+                .SingleOrDefaultAsync();
+            if (artist is null)
+            {
+                return Results.NotFound();
+            }
+
+            artist.Name = form.Name.Trim();
+            artist.Slug = Slugs.From(artist.Name);
+            await db.SaveChangesAsync();
+
+            return Results.Ok(new ArtistSummary(artist.Id, artist.Name, artist.Slug));
+        });
+
+        api.MapGet("/artists/{id:guid}/{slug?}", async (Guid id, string? slug, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        {
+            var artist = await db.Artists
+                .Where(a => a.Id == id)
+                .VisibleTo(caller)
+                .Select(a => new ArtistSummary(a.Id, a.Name, a.Slug))
+                .SingleOrDefaultAsync();
+
+            if (artist is null)
+            {
+                return Results.NotFound();
+            }
+            return slug == artist.Slug
+                ? Results.Ok(artist)
+                : Results.Redirect($"/api/artists/{artist.Id}/{artist.Slug}");
+        });
+
+        api.MapGet("/my-artists", async (ClaimsPrincipal caller, KleinGeldDbContext db) =>
+            await db.Artists
+                .ManagedBy(caller.MemberId())
+                .OrderBy(a => a.Name)
+                .Select(a => new ArtistSummary(a.Id, a.Name, a.Slug))
+                .ToListAsync());
+
         // Anyone who doesn't manage the Artist gets "not found", so this can't confirm that an id exists. A wrong or
         // old slug redirects with a 302: a cached 301 could loop if the Artist were later renamed back.
         api.MapGet("/my-artists/{id:guid}/{slug?}", async (Guid id, string? slug, ClaimsPrincipal caller, KleinGeldDbContext db) =>
@@ -66,9 +108,16 @@ internal static class ArtistEndpoints
         });
     }
 
-    private static IQueryable<Artist> ManagedBy(this IQueryable<Artist> artists, Guid memberId) =>
+    /// <summary>
+    /// The visibility rule for Artists: the Admin and an Artist's managing Members see it. Every other Member will
+    /// see it once it has a Published Release, which belongs here when Releases exist.
+    /// </summary>
+    private static IQueryable<Artist> VisibleTo(this IQueryable<Artist> artists, ClaimsPrincipal caller) =>
+        caller.IsInRole(Roles.Admin) ? artists : artists.ManagedBy(caller.MemberId());
+
+    public static IQueryable<Artist> ManagedBy(this IQueryable<Artist> artists, Guid memberId) =>
         artists.Where(a => a.Managers.Any(m => m.Id == memberId));
 
-    private static Guid MemberId(this ClaimsPrincipal member) =>
+    public static Guid MemberId(this ClaimsPrincipal member) =>
         Guid.Parse(member.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }
