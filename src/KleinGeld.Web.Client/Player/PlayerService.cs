@@ -35,7 +35,7 @@ public sealed class PlayerService
             MediaAction.Seek => SeekAsync(command.Position),
             _ => Task.CompletedTask,
         };
-        _audio.Ended += NextAsync;
+        _audio.Ended += EndAsync;
     }
 
     public event Action? Changed;
@@ -54,11 +54,19 @@ public sealed class PlayerService
 
     public TimeSpan Duration { get; private set; }
 
+    public RepeatMode Repeat { get; private set; }
+
     /// <summary>A short message for the Member about what just went wrong, if anything did.</summary>
     public string? Notice { get; private set; }
 
     /// <summary>Whether a phone shows the full player over the page rather than the mini player.</summary>
     public bool IsFullPlayerOpen { get; private set; }
+
+    public void SetRepeat(RepeatMode repeat)
+    {
+        Repeat = repeat;
+        Changed?.Invoke();
+    }
 
     public void OpenFullPlayer()
     {
@@ -160,7 +168,7 @@ public sealed class PlayerService
         Changed?.Invoke();
     }
 
-    /// <summary>Moves on to the next Track, or stops on the last one.</summary>
+    /// <summary>Moves on to the next Track. After the last one it wraps with repeat all and otherwise stops there.</summary>
     public async Task NextAsync()
     {
         if (Current is null)
@@ -171,6 +179,10 @@ public sealed class PlayerService
         if (CurrentIndex + 1 < _queue.Count)
         {
             await StartAsync(_queue, CurrentIndex + 1);
+        }
+        else if (Repeat == RepeatMode.All)
+        {
+            await StartAsync(_queue, 0);
         }
         else
         {
@@ -202,6 +214,10 @@ public sealed class PlayerService
         Position = position;
         Changed?.Invoke();
     }
+
+    // Only a Track ending by itself loops: Next always moves on. It starts over, because its play link may have expired.
+    private Task EndAsync() =>
+        Repeat == RepeatMode.One && Current is not null ? StartAsync(_queue, CurrentIndex) : NextAsync();
 
     private async Task StartAsync(List<PlayerTrack> queue, int index)
     {

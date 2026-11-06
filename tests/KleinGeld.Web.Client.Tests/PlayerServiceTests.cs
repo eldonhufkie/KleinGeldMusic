@@ -477,6 +477,114 @@ public sealed class PlayerServiceTests
         Assert.Equal(album, _player.Queue);
     }
 
+    [Fact]
+    public async Task Repeat_all_wraps_to_the_start_when_the_last_Track_ends()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 1);
+        _player.SetRepeat(RepeatMode.All);
+
+        await _audio.EndAsync();
+
+        Assert.Equal(album[0], _player.Current);
+        Assert.Equal(LinkOf(album[0]), _audio.PlayingSource);
+        Assert.True(_player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task Repeat_all_wraps_to_the_start_on_Next_from_the_last_Track()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 1);
+        _player.SetRepeat(RepeatMode.All);
+
+        await _player.NextAsync();
+
+        Assert.Equal(album[0], _player.Current);
+        Assert.True(_player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task Repeat_one_plays_the_Track_again_from_a_fresh_play_link_when_it_ends_by_itself()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 0);
+        _player.SetRepeat(RepeatMode.One);
+        var fresh = new Uri("https://blobs.example/fresh.m4a");
+        _links.Add(album[0].Id, fresh);
+        _audio.Report(new AudioProgress(TimeSpan.FromSeconds(180), TimeSpan.FromSeconds(180), IsPlaying: false));
+
+        await _audio.EndAsync();
+
+        Assert.Equal(album[0], _player.Current);
+        Assert.Equal(fresh.ToString(), _audio.PlayingSource);
+        Assert.True(_player.IsPlaying);
+        Assert.Equal(TimeSpan.Zero, _player.Position);
+    }
+
+    [Fact]
+    public async Task Repeat_one_loops_the_last_Track_when_it_ends_by_itself()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 1);
+        _player.SetRepeat(RepeatMode.One);
+        _audio.Report(new AudioProgress(TimeSpan.FromSeconds(180), TimeSpan.FromSeconds(180), IsPlaying: false));
+
+        await _audio.EndAsync();
+
+        Assert.Equal(album[1], _player.Current);
+        Assert.True(_player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task With_repeat_one_Next_still_moves_on()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 0);
+        _player.SetRepeat(RepeatMode.One);
+
+        await _player.NextAsync();
+
+        Assert.Equal(album[1], _player.Current);
+    }
+
+    [Fact]
+    public async Task With_repeat_one_the_Next_media_key_still_moves_on()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 0);
+        _player.SetRepeat(RepeatMode.One);
+
+        await _audio.PressAsync(new MediaCommand(MediaAction.Next));
+
+        Assert.Equal(album[1], _player.Current);
+    }
+
+    [Fact]
+    public async Task With_repeat_one_Next_on_the_last_Track_stops_there()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 1);
+        _player.SetRepeat(RepeatMode.One);
+
+        await _player.NextAsync();
+
+        Assert.Equal(album[1], _player.Current);
+        Assert.False(_player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task Choosing_repeat_tells_the_player_bar()
+    {
+        var changes = 0;
+        _player.Changed += () => changes++;
+
+        _player.SetRepeat(RepeatMode.All);
+
+        Assert.Equal(RepeatMode.All, _player.Repeat);
+        Assert.Equal(1, changes);
+    }
+
     private List<PlayerTrack> Album(params string[] titles)
     {
         var album = titles.Select(title => new PlayerTrack(Guid.CreateVersion7(), title, "De Kleingeld")).ToList();
