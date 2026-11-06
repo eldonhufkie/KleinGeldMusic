@@ -1,7 +1,12 @@
+@using KleinGeld.Web.Client.Tracks
+@implements IDisposable
 @inject HttpClient Http
 @inject IJSRuntime JS
 
-@* The Track list of a Draft: adds audio files, straight to blob storage, with each upload's progress. *@
+@*
+    The Track list of a Draft: adds audio files, straight to blob storage, with each upload's progress; edits each
+    Track's details; and reorders Tracks by dragging.
+*@
 
 <h2>Tracks</h2>
 
@@ -10,23 +15,54 @@
     <p role="alert">@message</p>
 }
 
-@if (_tracks.Count > 0)
-{
-    <ol>
-        @foreach (var track in _tracks)
-        {
-            <li>
-                @track.Title
-                <span class="stage-badge">@track.Status</span>
-                @if (_progress.TryGetValue(track.Id, out var percent))
-                {
-                    <progress max="100" value="@percent" aria-label="Upload of @track.Title">@percent%</progress>
-                }
-                <button type="button" disabled="@_busy" @onclick="() => RemoveAsync(track)">Remove</button>
-            </li>
-        }
-    </ol>
-}
+@* Always rendered: the drag module attaches to this element once. *@
+<div @ref="_list">
+    @if (_tracks.Count > 0)
+    {
+        <ol>
+            @foreach (var track in _tracks)
+            {
+                <li @key="track.Id" data-track-id="@track.Id">
+                    <button type="button" class="track-handle" disabled="@_busy" aria-label="Move @track.Title, or use the arrow keys">⠿</button>
+                    @track.Title
+                    @if (track.FeaturedArtists is not null)
+                    {
+                        <span>feat. @track.FeaturedArtists</span>
+                    }
+                    <TrackBadges Track="track" />
+                    <span class="stage-badge">@track.Status</span>
+                    @if (_progress.TryGetValue(track.Id, out var percent))
+                    {
+                        <progress max="100" value="@percent" aria-label="Upload of @track.Title">@percent%</progress>
+                    }
+                    <button type="button" disabled="@_busy" @onclick="() => StartEditing(track)">Edit</button>
+                    <button type="button" disabled="@_busy" @onclick="() => RemoveAsync(track)">Remove</button>
+
+                    @if (_editing == track.Id)
+                    {
+                        <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                            <DataAnnotationsValidator />
+
+                            <label for="track-title">Title</label>
+                            <InputText id="track-title" @bind-Value="_form.Title" maxlength="@ReleaseForm.TitleMaxLength" />
+                            <ValidationMessage For="() => _form.Title" />
+
+                            <label for="track-featured">Featured Artists (optional)</label>
+                            <InputText id="track-featured" @bind-Value="_form.FeaturedArtists" maxlength="@TrackForm.FeaturedArtistsMaxLength" />
+                            <ValidationMessage For="() => _form.FeaturedArtists" />
+
+                            <label><InputCheckbox @bind-Value="_form.SingleMark" /> Also out as a Single</label>
+                            <label><InputCheckbox @bind-Value="_form.Explicit" /> Explicit</label>
+
+                            <button type="submit" disabled="@_busy">Save</button>
+                            <button type="button" disabled="@_busy" @onclick="() => _editing = null">Cancel</button>
+                        </EditForm>
+                    }
+                </li>
+            }
+        </ol>
+    }
+</div>
 
 <label for="track-files">Add audio files</label>
 <input id="track-files" type="file" multiple accept="audio/*,.flac,.aiff,.aif,.m4a" disabled="@_busy" @ref="_input" @onchange="UploadChosenAsync" />
@@ -45,9 +81,81 @@
     private readonly List<string> _messages = [];
     private List<TrackSummary> _tracks = [];
     private ElementReference _input;
+    private ElementReference _list;
+    private DotNetObjectReference<ReleaseTracks>? _self;
+    private TrackForm _form = new();
+    private Guid? _editing;
     private bool _busy;
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "/track-reorder.js");
+            await module.InvokeVoidAsync("attach", _list, _self);
+        }
+    }
+
+    public void Dispose() => _self?.Dispose();
+
+    private void StartEditing(TrackSummary track)
+    {
+        _form = new TrackForm
+        {
+            Title = track.Title,
+            SingleMark = track.SingleMark,
+            FeaturedArtists = track.FeaturedArtists,
+            Explicit = track.Explicit,
+        };
+        _editing = track.Id;
+    }
+
+    private Task SaveAsync() => ChangeAsync(
+        () => Http.PutAsJsonAsync($"api/releases/{ReleaseId}/tracks/{_editing}", _form),
+        () => _editing = null);
+
+    [JSInvokable]
+    public async Task Reorder(List<Guid> trackIds)
+    {
+        await ChangeAsync(
+            () => Http.PutAsJsonAsync($"api/releases/{ReleaseId}/tracks/order", new TrackOrderForm { TrackIds = trackIds }),
+            () => { });
+        StateHasChanged();
+    }
+
+    /// <summary>Sends a change to the Track list, then shows the list as the server has it, whatever the outcome.</summary>
+    private async Task ChangeAsync(Func<Task<HttpResponseMessage>> send, Action onSuccess)
+    {
+        _busy = true;
+        _messages.Clear();
+        try
+        {
+            using var response = await send();
+            if (response.IsSuccessStatusCode)
+            {
+                onSuccess();
+            }
+            else
+            {
+                var problem = response.StatusCode == HttpStatusCode.Conflict
+                    ? await response.Content.ReadFromJsonAsync<Problem>()
+                    : null;
+                _messages.Add(problem?.Detail ?? "That couldn't be saved. Reload the page and try again.");
+            }
+            await LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _messages.Add("Something went wrong. Reload the page and try again.");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private async Task LoadAsync()
     {

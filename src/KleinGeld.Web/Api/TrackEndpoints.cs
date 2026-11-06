@@ -137,6 +137,52 @@ internal static class TrackEndpoints
             return refused ?? Results.Ok(new TrackConfirmation(ToSummary(confirmed!), note));
         });
 
+        api.MapPut("/releases/{id:guid}/tracks/order", async (
+            Guid id, TrackOrderForm form, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        {
+            var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+            {
+                // A list out of step with the Release means someone else added or removed a Track meanwhile.
+                if (form.TrackIds.Count != release.Tracks.Count
+                    || !form.TrackIds.ToHashSet().SetEquals(release.Tracks.Select(t => t.Id)))
+                {
+                    return Results.Problem(
+                        "The Track list has changed. Reload the page and try again.",
+                        statusCode: StatusCodes.Status409Conflict);
+                }
+
+                foreach (var track in release.Tracks)
+                {
+                    track.Position = form.TrackIds.IndexOf(track.Id) + 1;
+                }
+                await db.SaveChangesAsync();
+                return null;
+            });
+            return refused ?? Results.NoContent();
+        });
+
+        api.MapPut("/releases/{id:guid}/tracks/{trackId:guid}", async (
+            Guid id, Guid trackId, TrackForm form, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        {
+            Track? track = null;
+            var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+            {
+                track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
+                if (track is null)
+                {
+                    return Results.NotFound();
+                }
+
+                track.Title = form.Title.Trim();
+                track.SingleMark = form.SingleMark;
+                track.FeaturedArtists = string.IsNullOrWhiteSpace(form.FeaturedArtists) ? null : form.FeaturedArtists.Trim();
+                track.Explicit = form.Explicit;
+                await db.SaveChangesAsync();
+                return null;
+            });
+            return refused ?? Results.Ok(ToSummary(track!));
+        });
+
         api.MapDelete("/releases/{id:guid}/tracks/{trackId:guid}", (
             Guid id, Guid trackId, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links) =>
             RemoveAsync(db, links, id, trackId, caller));
@@ -231,5 +277,6 @@ internal static class TrackEndpoints
         return title.Length > ReleaseForm.TitleMaxLength ? title[..ReleaseForm.TitleMaxLength] : title;
     }
 
-    private static TrackSummary ToSummary(Track track) => new(track.Id, track.Title, track.Position, track.Status);
+    private static TrackSummary ToSummary(Track track) =>
+        new(track.Id, track.Title, track.Position, track.Status, track.SingleMark, track.FeaturedArtists, track.Explicit);
 }

@@ -227,6 +227,13 @@ namespace KleinGeld.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("Explicit")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("FeaturedArtists")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<string>("OriginalBlobName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -237,6 +244,9 @@ namespace KleinGeld.Data.Migrations
 
                     b.Property<Guid>("ReleaseId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("SingleMark")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Status")
                         .IsRequired()

@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace KleinGeld.Data.Migrations
 {
     [DbContext(typeof(KleinGeldDbContext))]
-    [Migration("20261106103943_ReleaseDetailsMayBeBlank")]
-    partial class ReleaseDetailsMayBeBlank
+    [Migration("20261106103405_TrackDetails")]
+    partial class TrackDetails
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -194,7 +194,7 @@ namespace KleinGeld.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<DateOnly?>("ReleaseDate")
+                    b.Property<DateOnly>("ReleaseDate")
                         .HasColumnType("date");
 
                     b.Property<string>("Slug")
@@ -230,6 +230,13 @@ namespace KleinGeld.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("Explicit")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("FeaturedArtists")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<string>("OriginalBlobName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -240,6 +247,9 @@ namespace KleinGeld.Data.Migrations
 
                     b.Property<Guid>("ReleaseId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("SingleMark")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Status")
                         .IsRequired()

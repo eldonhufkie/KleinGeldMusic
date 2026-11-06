@@ -12,7 +12,7 @@ namespace KleinGeld.Web.Blobs;
 /// </summary>
 internal sealed class CoverStore(BlobServiceClient blobs, BlobLinks links)
 {
-    private const string Container = "covers";
+    public const string Container = "covers";
     private const int MinimumSide = 1000;
     private const long MaximumBytes = 20L * 1024 * 1024;
     private const int SmallSide = 300;
