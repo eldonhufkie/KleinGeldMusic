@@ -1,5 +1,6 @@
 @implements IDisposable
 @inject IManagedArtistsState ManagedArtists
+@inject IReviewCountState ReviewCount
 
 <nav class="sidebar" aria-label="Main">
     <div class="sidebar-logo">KleinGeld Music</div>
@@ -9,7 +10,13 @@
         <NavLink href="my-artists">My Artists</NavLink>
     }
     <AuthorizeView Roles="@Roles.Admin">
-        <NavLink href="admin">Admin</NavLink>
+        <NavLink href="admin">
+            Admin
+            @if (ReviewCount.Count > 0)
+            {
+                <span class="review-badge" aria-label="Waiting for review">@ReviewCount.Count</span>
+            }
+        </NavLink>
     </AuthorizeView>
 </nav>
 
@@ -17,17 +24,23 @@
     protected override async Task OnInitializedAsync()
     {
         ManagedArtists.Changed += OnChanged;
+        ReviewCount.Changed += OnChanged;
         try
         {
             await ManagedArtists.LoadAsync();
+            await ReviewCount.LoadAsync();
         }
         catch (HttpRequestException)
         {
-            // The sidebar simply goes without My Artists until the next load.
+            // The sidebar simply goes without My Artists or the badge until the next load.
         }
     }
 
     private void OnChanged() => StateHasChanged();
 
-    public void Dispose() => ManagedArtists.Changed -= OnChanged;
+    public void Dispose()
+    {
+        ManagedArtists.Changed -= OnChanged;
+        ReviewCount.Changed -= OnChanged;
+    }
 }

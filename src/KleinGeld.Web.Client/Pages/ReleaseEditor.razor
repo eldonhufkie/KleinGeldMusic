@@ -28,6 +28,8 @@ else
         </p>
     }
 
+    @* A disabled fieldset turns off everything inside it, so the lock needs no check per control. *@
+    <fieldset class="release-fields" disabled="@Locked">
     <EditForm Model="_form" OnValidSubmit="SaveAsync" class="artist-form">
         <DataAnnotationsValidator />
 
@@ -62,12 +64,41 @@ else
 
     @if (_release is not null)
     {
-        <CoverUpload Release="_release" />
+        <CoverUpload Release="_release" OnUploaded="TakeInCover" />
 
-        <ReleaseTracks ReleaseId="_release.Id" OnConfirmed="TakeInPreFilledAsync" />
+        <ReleaseTracks ReleaseId="_release.Id" OnConfirmed="TakeInPreFilledAsync" OnStatusesChanged="TakeInStatuses" />
+    }
+    </fieldset>
 
+    @if (_release is not null)
+    {
         <p><a href="releases/@_release.Id/@_release.Slug">Open the Release page</a></p>
 
+        @if (_release.Stage is ReleaseStage.Draft or ReleaseStage.Rejected)
+        {
+            <h2>Submit</h2>
+            <label><input type="checkbox" @bind="_rightsDeclared" /> @RightsDeclarationWording.Text</label>
+            @if (SubmitRefusal is not null)
+            {
+                <p>@SubmitRefusal</p>
+            }
+            <button type="button" disabled="@(_busy || SubmitRefusal is not null || !_rightsDeclared)" @onclick="SubmitAsync">Submit for review</button>
+        }
+        else if (Locked)
+        {
+            <h2>Submitted</h2>
+            <p>This Release is waiting for the Admin's review and can't be changed. Withdraw it to edit it again.</p>
+            <button type="button" disabled="@_busy" @onclick="WithdrawAsync">Withdraw</button>
+        }
+
+        @if (_problem is not null)
+        {
+            <p role="alert">@_problem</p>
+        }
+    }
+
+    @if (_release is not null && !Locked)
+    {
         <h2>Delete</h2>
         @if (_confirmingDelete)
         {
@@ -98,7 +129,62 @@ else
     private bool _busy;
     private bool _failed;
 
+    private bool _rightsDeclared;
+    private string? _problem;
+    private IReadOnlyCollection<TrackStatus> _statuses = [];
+
     private string Heading => string.IsNullOrEmpty(_release?.Title) ? "New Release" : _release.Title;
+
+    private bool Locked => _release?.Stage == ReleaseStage.Submitted;
+
+    /// <summary>Goes by the form, not the saved Release: Submit saves what's typed first.</summary>
+    private string? SubmitRefusal => SubmitRules.Refusal(_form.Title, _form.ReleaseDate, _release?.Cover is not null, _statuses);
+
+    private void TakeInCover(CoverArt? cover) => _release = _release! with { Cover = cover };
+
+    private void TakeInStatuses(IReadOnlyCollection<TrackStatus> statuses) => _statuses = statuses;
+
+    private sealed record Refusal(string? Detail);
+
+    private async Task SubmitAsync()
+    {
+        await ChangeStageAsync(async () =>
+        {
+            var saved = await Http.PutAsJsonAsync($"api/releases/{Id}", _form);
+            return saved.IsSuccessStatusCode
+                ? await Http.PostAsJsonAsync($"api/releases/{Id}/submit", new SubmitForm { RightsDeclared = _rightsDeclared })
+                : saved;
+        });
+        _rightsDeclared = false;
+    }
+
+    private Task WithdrawAsync() => ChangeStageAsync(() => Http.PostAsync($"api/releases/{Id}/withdraw", null));
+
+    private async Task ChangeStageAsync(Func<Task<HttpResponseMessage>> send)
+    {
+        _busy = true;
+        _problem = null;
+        try
+        {
+            using var response = await send();
+            if (response.IsSuccessStatusCode)
+            {
+                Show(await response.Content.ReadFromJsonAsync<ReleaseDetails>());
+            }
+            else
+            {
+                _problem = (await response.Content.ReadFromJsonAsync<Refusal>())?.Detail ?? "Something went wrong. Reload the page and try again.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _problem = "Something went wrong. Reload the page and try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {

@@ -30,6 +30,7 @@ builder.AddEmailSender();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IManagedArtistsState, ServerManagedArtistsState>();
+builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IReviewCountState, ServerReviewCountState>();
 builder.Services.AddScoped<KleinGeld.Web.Client.Player.IPlayLinkSource, ServerPlayLinkSource>();
 KleinGeld.Web.Client.Player.PlayerRegistration.AddPlayer(builder.Services);
 
@@ -68,9 +69,11 @@ app.MapGroup("/api").RequireAuthorization().MapArtistEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapReleaseEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapTrackEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapCoverEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapSubmissionEndpoints();
 var adminApi = app.MapGroup("/api/admin").RequireAuthorization(admin => admin.RequireRole(Roles.Admin));
 adminApi.MapAdminJoinRequestEndpoints();
 adminApi.MapAdminMemberEndpoints();
+adminApi.MapAdminReviewEndpoints();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

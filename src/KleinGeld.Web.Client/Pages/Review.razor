@@ -1,0 +1,58 @@
+@page "/admin/review"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inject HttpClient Http
+@inject IReviewCountState ReviewCount
+
+@* The Submitted Releases, oldest first, so the Admin works through them fairly. *@
+
+<PageTitle>Review · KleinGeld Music</PageTitle>
+
+<h1>Review</h1>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+
+@if (_releases is null)
+{
+    <p>@(_failed ? "" : "Loading…")</p>
+}
+else if (_releases.Count == 0)
+{
+    <p>Nothing is waiting for review.</p>
+}
+else
+{
+    <ul class="join-requests">
+        @foreach (var release in _releases)
+        {
+            <li class="join-request">
+                <p><strong>@release.Title</strong> by @release.ArtistName <span class="stage-badge">@release.Type</span></p>
+                <p>
+                    Submitted @release.SubmittedAt.ToString("d MMMM yyyy, HH:mm")
+                    by @(release.RightsDeclarations[0].MemberName ?? "a former Member"),
+                    with Rights Declaration version @release.RightsDeclarations[0].WordingVersion
+                </p>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private List<ReviewRelease>? _releases;
+    private bool _failed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _releases = await Http.GetFromJsonAsync<List<ReviewRelease>>("api/admin/review");
+            await ReviewCount.LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+}

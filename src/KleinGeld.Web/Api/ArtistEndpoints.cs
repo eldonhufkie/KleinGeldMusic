@@ -182,7 +182,7 @@ internal static class ArtistEndpoints
     /// Members as shown to managers, A–Z: by the name they gave when asking to join, as a Member has no name of their
     /// own, or else their email.
     /// </summary>
-    private static async Task<List<ArtistManager>> WithNamesAsync(this IQueryable<Member> members, KleinGeldDbContext db)
+    internal static async Task<List<ArtistManager>> WithNamesAsync(this IQueryable<Member> members, KleinGeldDbContext db)
     {
         var named = await members
             .Select(m => new

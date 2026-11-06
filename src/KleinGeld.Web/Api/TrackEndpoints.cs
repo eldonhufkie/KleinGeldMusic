@@ -300,36 +300,12 @@ internal static class TrackEndpoints
     /// </summary>
     private static Task<IResult?> WithReleaseLockedAsync(
         KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, Func<Release, Task<IResult?>> change) =>
-        // Retries run the whole transaction again, so nothing tracked by a failed attempt may carry over.
-        db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
-        {
-            db.ChangeTracker.Clear();
-            await using var transaction = await db.Database.BeginTransactionAsync();
-            await db.Database.ExecuteSqlAsync($"""SELECT 1 FROM "Releases" WHERE "Id" = {id} FOR UPDATE""");
-
-            var release = await db.Releases
-                .Include(r => r.Tracks)
-                .Where(r => r.Id == id)
-                .ManagedBy(caller.MemberId())
-                .SingleOrDefaultAsync();
-            if (release is null)
-            {
-                return Results.NotFound();
-            }
-            if (release.Stage is not (ReleaseStage.Draft or ReleaseStage.Rejected))
-            {
-                return Results.Problem(
+        db.WithManagedReleaseLockedAsync(id, caller, release =>
+            release.Stage is ReleaseStage.Draft or ReleaseStage.Rejected
+                ? change(release)
+                : Task.FromResult<IResult?>(Results.Problem(
                     "Tracks can only be changed on a Draft or Rejected Release.",
-                    statusCode: StatusCodes.Status409Conflict);
-            }
-
-            var refused = await change(release);
-            if (refused is null)
-            {
-                await transaction.CommitAsync();
-            }
-            return refused;
-        });
+                    statusCode: StatusCodes.Status409Conflict)));
 
     private static void PreFill(Release release, EmbeddedTags tags)
     {

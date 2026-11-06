@@ -23,7 +23,9 @@ public sealed class LoginTests(KleinGeldApp app)
 
         var me = await client.GetFromJsonAsync<MeResponse>("/api/me");
 
-        Assert.Equal(new MeResponse(KleinGeldApp.AdminEmail, IsAdmin: true), me);
+        // Not ManagesArtist: tests share the app, and some give the Admin an Artist of their own.
+        Assert.Equal(KleinGeldApp.AdminEmail, me!.Email);
+        Assert.True(me.IsAdmin);
     }
 
     [Fact]
