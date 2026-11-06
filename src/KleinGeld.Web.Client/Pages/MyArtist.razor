@@ -33,7 +33,7 @@ else
             @foreach (var release in _artist.Releases)
             {
                 <li>
-                    <a href="my-releases/@release.Id/@release.Slug">@release.Title</a>
+                    <a href="my-releases/@release.Id/@release.Slug">@(release.Title.Length > 0 ? release.Title : "Untitled")</a>
                     <span class="stage-badge">@release.Stage</span>
                 </li>
             }

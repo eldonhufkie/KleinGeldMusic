@@ -82,6 +82,20 @@ internal sealed class CoverStore(BlobServiceClient blobs, BlobLinks links)
         return refusal;
     }
 
+    /// <summary>
+    /// Puts cover art found in an audio file through the same checks as an upload. Answers the new cover's id, or why
+    /// the art was refused.
+    /// </summary>
+    public async Task<(Guid? CoverId, string? Refusal)> AcceptEmbeddedAsync(Guid releaseId, byte[] art)
+    {
+        var coverId = Guid.CreateVersion7();
+        await Covers.CreateIfNotExistsAsync();
+        await Covers.GetBlobClient(Original(releaseId, coverId)).UploadAsync(BinaryData.FromBytes(art));
+
+        var refusal = await AcceptAsync(releaseId, coverId);
+        return refusal is null ? (coverId, null) : (null, refusal);
+    }
+
     public CoverArt LinksTo(Guid releaseId, Guid coverId) => new(
         links.ForReading(Container, Copy(releaseId, coverId, SmallSide), ReadLinkLifetime),
         links.ForReading(Container, Copy(releaseId, coverId, LargeSide), ReadLinkLifetime));

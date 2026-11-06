@@ -8,7 +8,7 @@ public sealed record ReleaseDetails(
     string Title,
     string Slug,
     ReleaseType Type,
-    DateOnly ReleaseDate,
+    DateOnly? ReleaseDate,
     string? Description,
     string? Genre,
     ReleaseStage Stage,

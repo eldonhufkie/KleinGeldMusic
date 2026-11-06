@@ -6,7 +6,7 @@
 
 @* Starts a New Release, or edits an existing one. The API redirects an old slug; the address follows here. *@
 
-<PageTitle>@(Id is null ? "New Release" : _form.Title) · KleinGeld Music</PageTitle>
+<PageTitle>@Heading · KleinGeld Music</PageTitle>
 
 @if (_failed)
 {
@@ -19,7 +19,7 @@
 }
 else
 {
-    <h1>@(_release?.Title ?? "New Release")</h1>
+    <h1>@Heading</h1>
     @if (_release is not null)
     {
         <p>
@@ -64,7 +64,7 @@ else
     {
         <CoverUpload Release="_release" />
 
-        <ReleaseTracks ReleaseId="_release.Id" />
+        <ReleaseTracks ReleaseId="_release.Id" OnConfirmed="TakeInPreFilledAsync" />
 
         <h2>Delete</h2>
         @if (_confirmingDelete)
@@ -96,9 +96,12 @@ else
     private bool _busy;
     private bool _failed;
 
+    private string Heading => string.IsNullOrEmpty(_release?.Title) ? "New Release" : _release.Title;
+
     protected override async Task OnParametersSetAsync()
     {
-        if (Id is null)
+        // The address changing to a new slug isn't a new Release, and reloading would lose what's being typed.
+        if (Id is null || _release?.Id == Id)
         {
             return;
         }
@@ -125,6 +128,26 @@ else
         _form.ReleaseDate = _release.ReleaseDate;
         _form.Description = _release.Description;
         _form.Genre = _release.Genre;
+        if (_release.Slug != Slug)
+        {
+            Navigation.NavigateTo($"my-releases/{_release.Id}/{_release.Slug}", replace: true);
+        }
+    }
+
+    /// <summary>Shows what an audio file's tags filled, in the form's blank fields only: the rest may be unsaved typing.</summary>
+    private async Task TakeInPreFilledAsync()
+    {
+        var latest = await Http.GetFromJsonAsync<ReleaseDetails>($"api/releases/{_release!.Id}/{_release.Slug}");
+        _release = latest!;
+        if (string.IsNullOrWhiteSpace(_form.Title))
+        {
+            _form.Title = _release.Title;
+        }
+        _form.ReleaseDate ??= _release.ReleaseDate;
+        if (string.IsNullOrWhiteSpace(_form.Genre))
+        {
+            _form.Genre = _release.Genre;
+        }
         if (_release.Slug != Slug)
         {
             Navigation.NavigateTo($"my-releases/{_release.Id}/{_release.Slug}", replace: true);
