@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KleinGeld.Contracts;
 
 namespace KleinGeld.Web.Client.Player;
 
@@ -361,7 +362,7 @@ public sealed class PlayerService
     {
         var attempt = ++_attempt;
         var track = queue[index].Track;
-        var link = await _links.ForTrackAsync(track.Id);
+        var link = await LinkOrNothingAsync(track.Id);
         if (attempt != _attempt)
         {
             return;
@@ -390,7 +391,7 @@ public sealed class PlayerService
     {
         var attempt = ++_attempt;
         var track = Current!;
-        var link = await _links.ForTrackAsync(track.Id);
+        var link = await LinkOrNothingAsync(track.Id);
         if (attempt != _attempt)
         {
             return;
@@ -436,8 +437,33 @@ public sealed class PlayerService
     private async Task<HashSet<Guid>> AvailableAsync(List<QueueEntry> queue)
     {
         var ids = queue.Where(entry => entry.Track.IsAvailable).Select(entry => entry.Track.Id).Distinct().ToList();
-        var links = await Task.WhenAll(ids.Select(_links.ForTrackAsync));
-        return ids.Where((_, index) => links[index] is not null).ToHashSet();
+        var kept = await Task.WhenAll(ids.Select(IsNotRefusedAsync));
+        return ids.Where((_, index) => kept[index]).ToHashSet();
+    }
+
+    // Only a refusal drops a Track: a bad moment for the server must not cost the Member their Queue.
+    private async Task<bool> IsNotRefusedAsync(Guid trackId)
+    {
+        try
+        {
+            return await _links.ForTrackAsync(trackId) is not null;
+        }
+        catch (PlayLinkFailedException)
+        {
+            return true;
+        }
+    }
+
+    private async Task<PlayLink?> LinkOrNothingAsync(Guid trackId)
+    {
+        try
+        {
+            return await _links.ForTrackAsync(trackId);
+        }
+        catch (PlayLinkFailedException)
+        {
+            return null;
+        }
     }
 
     private void Save() => _ = SaveAsync();

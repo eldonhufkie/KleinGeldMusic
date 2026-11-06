@@ -989,6 +989,83 @@ public sealed class PlayerServiceTests
     }
 
     [Fact]
+    public async Task A_failure_to_get_a_play_link_on_reload_keeps_the_Track()
+    {
+        var (first, second) = TwoTracks();
+        await _player.PlayAsync([first, second, Track], 1);
+        await _player.SeekAsync(TimeSpan.FromSeconds(42));
+        _links.Fail(first.Id);
+        _links.Fail(second.Id);
+
+        var (reloaded, _) = await ReloadAsync();
+
+        Assert.Equal([first, second, Track], reloaded.Queue);
+        Assert.Equal(second, reloaded.Current);
+        Assert.Equal(TimeSpan.FromSeconds(42), reloaded.Position);
+    }
+
+    [Fact]
+    public async Task On_reload_only_a_refused_Track_goes_when_others_fail()
+    {
+        var (first, second) = TwoTracks();
+        await _player.PlayAsync([first, second, Track], 0);
+        _links.Fail(first.Id);
+        _links.Remove(second.Id);
+
+        var (reloaded, _) = await ReloadAsync();
+
+        Assert.Equal([first, Track], reloaded.Queue);
+    }
+
+    [Fact]
+    public async Task What_a_failed_reload_kept_survives_the_next_save()
+    {
+        var (first, second) = TwoTracks();
+        await _player.PlayAsync([first, second], 0);
+        _links.Fail(first.Id);
+        _links.Fail(second.Id);
+        var (reloaded, _) = await ReloadAsync();
+
+        await reloaded.SetVolumeAsync(0.5);
+        _links.Recover(first.Id);
+        _links.Recover(second.Id);
+        var (again, _) = await ReloadAsync();
+
+        Assert.Equal([first, second], again.Queue);
+    }
+
+    [Fact]
+    public async Task Pressing_play_while_the_link_fails_gives_a_notice_and_keeps_the_restored_Track_ready()
+    {
+        await _player.PlayAsync(Track);
+        _links.Fail(Track.Id);
+        var (reloaded, audio) = await ReloadAsync();
+
+        await reloaded.ResumeAsync();
+
+        Assert.NotNull(reloaded.Notice);
+        Assert.Equal(Track, reloaded.Current);
+
+        _links.Recover(Track.Id);
+        await reloaded.ResumeAsync();
+
+        Assert.Equal(Link.ToString(), audio.PlayingSource);
+    }
+
+    [Fact]
+    public async Task Failing_to_get_a_play_link_for_the_next_Track_gives_a_notice_and_keeps_the_current_one()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 0);
+        _links.Fail(album[1].Id);
+
+        await _player.NextAsync();
+
+        Assert.Equal(album[0], _player.Current);
+        Assert.NotNull(_player.Notice);
+    }
+
+    [Fact]
     public async Task Pressing_play_while_restoring_wins_over_the_saved_Queue()
     {
         var (first, second) = TwoTracks();
@@ -1195,11 +1272,17 @@ public sealed class PlayerServiceTests
     {
         private readonly Dictionary<Guid, PlayLink> _links = [];
         private readonly Dictionary<Guid, TaskCompletionSource> _held = [];
+        private readonly HashSet<Guid> _failing = [];
 
         public void Add(Guid trackId, Uri link, CoverArt? cover = null) =>
             _links[trackId] = new PlayLink(link, DateTimeOffset.UtcNow.AddMinutes(10), cover);
 
         public void Remove(Guid trackId) => _links.Remove(trackId);
+
+        /// <summary>Makes asking for the Track's link fail, as a server error or a lost network does.</summary>
+        public void Fail(Guid trackId) => _failing.Add(trackId);
+
+        public void Recover(Guid trackId) => _failing.Remove(trackId);
 
         /// <summary>Keeps the Track's link back until the returned source is completed.</summary>
         public TaskCompletionSource Hold(Guid trackId) => _held[trackId] = new TaskCompletionSource();
@@ -1209,6 +1292,11 @@ public sealed class PlayerServiceTests
             if (_held.TryGetValue(trackId, out var held))
             {
                 await held.Task;
+            }
+
+            if (_failing.Contains(trackId))
+            {
+                throw new PlayLinkFailedException("The server had a bad day.");
             }
 
             return _links.GetValueOrDefault(trackId);
