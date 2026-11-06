@@ -121,5 +121,6 @@ internal static class ReleaseEndpoints
         release.Genre,
         release.Stage,
         release.CoverId is { } coverId ? covers.LinksTo(release.Id, coverId) : null,
-        release.PublishedAt);
+        release.PublishedAt,
+        release.RejectionReason);
 }

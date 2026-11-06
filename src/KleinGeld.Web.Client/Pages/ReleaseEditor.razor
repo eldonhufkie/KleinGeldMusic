@@ -26,6 +26,11 @@ else
             <a href="my-artists/@_release.ArtistId">@_release.ArtistName</a>
             <span class="stage-badge">@_release.Stage</span>
         </p>
+        @if (_release.RejectionReason is not null)
+        {
+            <p>The Admin rejected this Release:</p>
+            <p class="rejection-reason">@_release.RejectionReason</p>
+        }
     }
 
     @* A disabled fieldset turns off everything inside it, so the lock needs no check per control. *@

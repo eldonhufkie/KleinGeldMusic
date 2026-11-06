@@ -13,4 +13,5 @@ public sealed record ReleaseDetails(
     string? Genre,
     ReleaseStage Stage,
     CoverArt? Cover = null,
-    DateTimeOffset? PublishedAt = null);
+    DateTimeOffset? PublishedAt = null,
+    string? RejectionReason = null);

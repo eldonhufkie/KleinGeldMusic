@@ -33,6 +33,19 @@ internal static class MemberEmails
             "KleinGeld Music",
         ]));
 
+    /// <summary>Email 8: the Admin Rejected a Release, with the reason.</summary>
+    public static OutgoingEmail ReleaseRejected(MailboxAddress manager, Release release) =>
+        new(manager, $"{release.Title} was rejected", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin rejected \"{release.Title}\" by {release.Artist.Name}:",
+            "",
+            release.RejectionReason!,
+            "",
+            "You can edit it under My Artists and submit it again.",
+        ]));
+
     /// <summary>Email 3: Forgot password, with the link to choose a new one.</summary>
     public static OutgoingEmail PasswordReset(MailboxAddress member, Uri setPasswordLink) =>
         new(member, "Reset your KleinGeld Music password", string.Join(Environment.NewLine,

@@ -69,28 +69,74 @@ internal static class AdminReviewEndpoints
             }
 
             // The Release is Published whatever happens here: Members can already play it even if the email fails.
-            try
-            {
-                var adminIds = (await members.GetUsersInRoleAsync(Roles.Admin)).Select(a => a.Id).ToList();
-                var addresses = await db.Artists
-                    .Where(a => a.Id == approved!.ArtistId)
-                    .SelectMany(a => a.Managers)
-                    .Where(m => !adminIds.Contains(m.Id))
-                    .Select(m => m.Email!)
-                    .ToListAsync();
-
-                foreach (var address in addresses)
-                {
-                    await emails.SendAsync(MemberEmails.ReleaseApproved(new MailboxAddress(null, address), approved!));
-                }
-            }
-            catch (Exception exception)
-            {
-                loggers.CreateLogger(typeof(AdminReviewEndpoints)).LogError(exception, "Couldn't email the managers of Release {ReleaseId}.", id);
-            }
+            await EmailManagersAsync(approved!, MemberEmails.ReleaseApproved, db, members, emails, loggers);
 
             return Results.Ok(approved!.ToDetails(covers));
         });
+
+        api.MapPost("/review/releases/{id:guid}/reject", async (
+            Guid id,
+            RejectForm form,
+            KleinGeldDbContext db,
+            CoverStore covers,
+            UserManager<Member> members,
+            EmailSender emails,
+            ILoggerFactory loggers) =>
+        {
+            Release? rejected = null;
+            var refused = await db.WithReviewedReleaseLockedAsync(id, async release =>
+            {
+                if (release.Stage != ReleaseStage.Submitted)
+                {
+                    return Results.Problem("Only a Submitted Release can be rejected.", statusCode: StatusCodes.Status409Conflict);
+                }
+
+                release.Stage = ReleaseStage.Rejected;
+                release.RejectionReason = form.Reason.Trim();
+                await db.SaveChangesAsync();
+                rejected = release;
+                return null;
+            });
+            if (refused is not null)
+            {
+                return refused;
+            }
+
+            // The Release is Rejected whatever happens here: My Artists shows the reason even if the email fails.
+            await EmailManagersAsync(rejected!, MemberEmails.ReleaseRejected, db, members, emails, loggers);
+
+            return Results.Ok(rejected!.ToDetails(covers));
+        });
+    }
+
+    /// <summary>Tells the Artist's managers the outcome, except any Admin, who made it. A failure is only logged.</summary>
+    private static async Task EmailManagersAsync(
+        Release release,
+        Func<MailboxAddress, Release, OutgoingEmail> email,
+        KleinGeldDbContext db,
+        UserManager<Member> members,
+        EmailSender emails,
+        ILoggerFactory loggers)
+    {
+        try
+        {
+            var adminIds = (await members.GetUsersInRoleAsync(Roles.Admin)).Select(a => a.Id).ToList();
+            var addresses = await db.Artists
+                .Where(a => a.Id == release.ArtistId)
+                .SelectMany(a => a.Managers)
+                .Where(m => !adminIds.Contains(m.Id))
+                .Select(m => m.Email!)
+                .ToListAsync();
+
+            foreach (var address in addresses)
+            {
+                await emails.SendAsync(email(new MailboxAddress(null, address), release));
+            }
+        }
+        catch (Exception exception)
+        {
+            loggers.CreateLogger(typeof(AdminReviewEndpoints)).LogError(exception, "Couldn't email the managers of Release {ReleaseId}.", release.Id);
+        }
     }
 
     /// <summary>How much is waiting on the Review page, which the badge on the Admin link shows.</summary>

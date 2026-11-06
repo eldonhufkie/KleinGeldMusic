@@ -194,6 +194,10 @@ namespace KleinGeld.Data.Migrations
                     b.Property<DateTimeOffset?>("PublishedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<DateOnly?>("ReleaseDate")
                         .HasColumnType("date");
 

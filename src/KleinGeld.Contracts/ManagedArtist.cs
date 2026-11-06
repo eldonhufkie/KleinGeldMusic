@@ -12,4 +12,4 @@ public sealed record ManagedArtist(
 public sealed record ArtistManager(Guid Id, string Name);
 
 /// <summary>A Release on an Artist's page in My Artists, with the stage its badge shows.</summary>
-public sealed record ManagedRelease(Guid Id, string Title, string Slug, ReleaseType Type, DateOnly? ReleaseDate, ReleaseStage Stage);
+public sealed record ManagedRelease(Guid Id, string Title, string Slug, ReleaseType Type, DateOnly? ReleaseDate, ReleaseStage Stage, string? RejectionReason = null);
