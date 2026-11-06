@@ -1,0 +1,78 @@
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+@* Uploads a Release's cover art straight to blob storage, then asks the API to check it. *@
+
+<h2>Cover art</h2>
+@if (_cover is not null)
+{
+    <img class="cover-art" src="@_cover.Small" alt="Cover art" width="300" height="300" />
+}
+<p>A square JPEG or PNG of at least 1000×1000 px and at most 20 MB.</p>
+<input type="file" accept="image/jpeg,image/png" aria-label="Choose cover art" disabled="@(_progress is not null)" @ref="_input" @onchange="UploadAsync" />
+@if (_progress is not null)
+{
+    <progress max="100" value="@_progress" aria-label="Upload progress"></progress>
+}
+@if (_problem is not null)
+{
+    <p role="alert">@_problem</p>
+}
+
+@code {
+    private const string Failed = "The upload failed. Try again.";
+
+    [Parameter, EditorRequired]
+    public required ReleaseDetails Release { get; set; }
+
+    private ElementReference _input;
+    private CoverArt? _cover;
+    private int? _progress;
+    private string? _problem;
+
+    protected override void OnParametersSet() => _cover ??= Release.Cover;
+
+    private async Task UploadAsync()
+    {
+        _progress = 0;
+        _problem = null;
+        try
+        {
+            using var requested = await Http.PostAsync($"api/releases/{Release.Id}/cover/upload-link", null);
+            requested.EnsureSuccessStatusCode();
+            var link = (await requested.Content.ReadFromJsonAsync<UploadLink>())!;
+
+            var sent = await BlobUpload.SendAsync(JS, _input, link.Url, percent =>
+            {
+                _progress = percent;
+                StateHasChanged();
+            });
+            if (!sent)
+            {
+                _problem = Failed;
+                return;
+            }
+
+            using var confirmed = await Http.PostAsJsonAsync(
+                $"api/releases/{Release.Id}/cover", new ConfirmUploadForm { UploadId = link.UploadId });
+            if (confirmed.IsSuccessStatusCode)
+            {
+                _cover = (await confirmed.Content.ReadFromJsonAsync<ReleaseDetails>())!.Cover;
+            }
+            else
+            {
+                _problem = (await confirmed.Content.ReadFromJsonAsync<Refusal>())?.Detail ?? Failed;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _problem = Failed;
+        }
+        finally
+        {
+            _progress = null;
+        }
+    }
+
+    private sealed record Refusal(string? Detail);
+}

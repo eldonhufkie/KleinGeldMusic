@@ -194,6 +194,12 @@ body:has(.app-shell) #app-loading {
     padding: 0.375rem 0.5rem;
 }
 
+.cover-art {
+    display: block;
+    height: auto;
+    max-width: 100%;
+}
+
 .stage-badge {
     border: 1px solid currentColor;
     border-radius: 0.25rem;
