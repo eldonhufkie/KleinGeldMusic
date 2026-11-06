@@ -74,6 +74,14 @@ public sealed class KleinGeldApp : IAsyncLifetime
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>Runs the daily clean-up of unattached uploads now, by the time the web host's clock shows.</summary>
+    public async Task RunUploadCleanUpAsync()
+    {
+        using var client = CreateWebClient();
+        using var response = await client.PostAsync("/testing/upload-clean-up", null);
+        response.EnsureSuccessStatusCode();
+    }
+
     /// <summary>Changes a Member's security stamp, as a password change or a Remove would.</summary>
     public async Task ChangeSecurityStampAsync(string email)
     {
