@@ -30,6 +30,9 @@ public sealed class Release
     /// <summary>When the Release was first approved; null until then, and a later approval leaves it as it is.</summary>
     public DateTimeOffset? PublishedAt { get; set; }
 
+    /// <summary>Why the Admin Rejected it; null unless it is Rejected, since a resubmission answers the reason.</summary>
+    public string? RejectionReason { get; set; }
+
     /// <summary>Names the blobs of the current cover art; null until one is uploaded.</summary>
     public Guid? CoverId { get; set; }
 

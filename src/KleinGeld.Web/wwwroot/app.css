@@ -233,6 +233,10 @@ body:has(.app-shell) #app-loading {
     padding: 0;
 }
 
+.rejection-reason {
+    white-space: pre-line;
+}
+
 .stage-badge {
     border: 1px solid currentColor;
     border-radius: 0.25rem;
