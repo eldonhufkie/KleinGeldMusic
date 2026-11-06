@@ -1,3 +1,4 @@
+using KleinGeld.Contracts;
 using KleinGeld.Data;
 using KleinGeld.Web.Blobs;
 using Microsoft.AspNetCore.Identity;
@@ -39,6 +40,23 @@ internal static class TestingEndpoints
             return Results.NoContent();
         });
 
+        // A list needs more Releases than going through upload, conversion and approval for each would allow.
+        testing.MapPost("/published-releases", async (KleinGeldDbContext db, [FromBody] SeededReleases seeded) =>
+        {
+            db.Releases.AddRange(seeded.Releases.Select(r => new Release
+            {
+                ArtistId = seeded.ArtistId,
+                Title = r.Title,
+                Slug = "seeded",
+                Type = seeded.Type,
+                ReleaseDate = r.ReleaseDate,
+                Stage = ReleaseStage.Published,
+                PublishedAt = r.PublishedAt,
+            }));
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
         testing.MapPost("/security-stamp",async (UserManager<Member> members, [FromBody] string email) =>
         {
             var member = await members.FindByEmailAsync(email);
@@ -51,4 +69,8 @@ internal static class TestingEndpoints
             return Results.NoContent();
         });
     }
+
+    private sealed record SeededRelease(string Title, DateTimeOffset PublishedAt, DateOnly? ReleaseDate);
+
+    private sealed record SeededReleases(Guid ArtistId, ReleaseType Type, List<SeededRelease> Releases);
 }

@@ -8,11 +8,13 @@
 <nav class="sidebar" aria-label="Main">
     <div class="sidebar-logo">KleinGeld Music</div>
     <NavLink href="" Match="NavLinkMatch.All">Home</NavLink>
+    <NavLink href="releases">Releases</NavLink>
     @MemberLinks
 </nav>
 
 <nav class="tab-bar" aria-label="Tabs">
     <NavLink href="" Match="NavLinkMatch.All">Home</NavLink>
+    <NavLink href="releases">Releases</NavLink>
     @* Keyed on the navigation count: a new element is a closed one, so More folds away once a link in it is followed. *@
     <details class="tab-more" @key="_navigations">
         <summary>More</summary>

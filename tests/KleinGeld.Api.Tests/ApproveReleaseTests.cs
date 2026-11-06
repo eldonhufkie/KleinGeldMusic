@@ -154,6 +154,43 @@ public sealed partial class SubmitReleaseTests
         await AssertNoEmailAsync(title);
     }
 
+    [Fact]
+    public async Task Only_Published_Releases_appear_in_the_lists_even_for_the_Admin_and_managers()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var otherMember = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var draft = await CreateDraftAsync(manager, CompleteForm("Nog Niet Klaar"));
+        var submittedRelease = await CreateCompleteDraftAsync(manager);
+        using var submitted = await SubmitAsync(manager, submittedRelease);
+        var published = await CreateCompleteDraftAsync(manager);
+        using var submittedPublished = await SubmitAsync(manager, published);
+        using var approved = await ApproveAsync(admin, published);
+
+        foreach (var client in new[] { manager, otherMember, admin })
+        {
+            var listed = await ReadReleasesGridAsync(client);
+            Assert.DoesNotContain(listed, r => r.Id == draft.Id || r.Id == submittedRelease.Id);
+            var card = Assert.Single(listed, r => r.Id == published.Id);
+            Assert.Equal(published.ArtistName, card.ArtistName);
+            Assert.NotNull(card.Cover);
+        }
+    }
+
+    private static async Task<List<ReleaseCard>> ReadReleasesGridAsync(HttpClient member)
+    {
+        var cards = new List<ReleaseCard>();
+        string? next = null;
+        do
+        {
+            var page = await member.GetFromJsonAsync<ReleaseList>($"/api/releases{(next is null ? "" : $"?after={next}")}");
+            cards.AddRange(page!.Items);
+            next = page.Next;
+        }
+        while (next is not null);
+        return cards;
+    }
+
     private async Task<(HttpClient Client, string Name, string Email)> LoginAsNewManagerAsync()
     {
         var name = $"Manager {Guid.NewGuid():N}";
