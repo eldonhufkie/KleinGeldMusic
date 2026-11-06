@@ -1,7 +1,33 @@
+@implements IDisposable
+@inject IManagedArtistsState ManagedArtists
+
 <nav class="sidebar" aria-label="Main">
     <div class="sidebar-logo">KleinGeld Music</div>
     <NavLink href="" Match="NavLinkMatch.All">Home</NavLink>
+    @if (ManagedArtists.ManagesArtist)
+    {
+        <NavLink href="my-artists">My Artists</NavLink>
+    }
     <AuthorizeView Roles="@Roles.Admin">
         <NavLink href="admin">Admin</NavLink>
     </AuthorizeView>
 </nav>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        ManagedArtists.Changed += OnChanged;
+        try
+        {
+            await ManagedArtists.LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            // The sidebar simply goes without My Artists until the next load.
+        }
+    }
+
+    private void OnChanged() => StateHasChanged();
+
+    public void Dispose() => ManagedArtists.Changed -= OnChanged;
+}

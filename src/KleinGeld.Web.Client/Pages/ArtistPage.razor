@@ -1,0 +1,52 @@
+@page "/artists/{Id:guid}/{Slug?}"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+@* The public Artist page. Only the name so far; the API answers "not found" to Members who may not see the Artist. *@
+
+<PageTitle>@(_artist?.Name ?? "Artist") · KleinGeld Music</PageTitle>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+else if (_artist is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <h1>@_artist.Name</h1>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [Parameter]
+    public string? Slug { get; set; }
+
+    private ArtistSummary? _artist;
+    private bool _failed;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _artist = await Http.GetFromJsonAsync<ArtistSummary>($"api/artists/{Id}/{Slug}");
+            if (_artist!.Slug != Slug)
+            {
+                Navigation.NavigateTo($"artists/{Id}/{_artist.Slug}", replace: true);
+            }
+        }
+        catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.NotFound)
+        {
+            Navigation.NotFound();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+}

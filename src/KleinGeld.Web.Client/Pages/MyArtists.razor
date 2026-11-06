@@ -1,0 +1,91 @@
+@page "/my-artists"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IManagedArtistsState ManagedArtists
+
+@* The Artists this Member manages, and where any Member creates an Artist (the first one puts this page in the sidebar). *@
+
+<PageTitle>My Artists · KleinGeld Music</PageTitle>
+
+<h1>My Artists</h1>
+
+@if (_artists is null)
+{
+    <p>@(_failed ? "" : "Loading…")</p>
+}
+else if (_artists.Count == 0)
+{
+    <p>You don't manage an Artist yet.</p>
+}
+else
+{
+    <ul class="artists">
+        @foreach (var artist in _artists)
+        {
+            <li><a href="my-artists/@artist.Id/@artist.Slug">@artist.Name</a></li>
+        }
+    </ul>
+}
+
+<h2>Create an Artist</h2>
+<EditForm Model="_form" OnValidSubmit="CreateAsync" class="artist-form">
+    <DataAnnotationsValidator />
+
+    <label for="artist-name">Name</label>
+    <InputText id="artist-name" @bind-Value="_form.Name" maxlength="@ArtistForm.NameMaxLength" />
+    <ValidationMessage For="() => _form.Name" />
+
+    @if (_failed)
+    {
+        <p class="validation-message" role="alert">Something went wrong. Reload the page and try again.</p>
+    }
+
+    <button type="submit" disabled="@_creating">@(_creating ? "Creating…" : "Create Artist")</button>
+</EditForm>
+
+@code {
+    private readonly ArtistForm _form = new();
+    private List<ArtistSummary>? _artists;
+    private bool _creating;
+    private bool _failed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _artists = await Http.GetFromJsonAsync<List<ArtistSummary>>("api/my-artists");
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        _creating = true;
+        _failed = false;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync("api/artists", _form);
+            var artist = response.IsSuccessStatusCode ? await response.Content.ReadFromJsonAsync<ArtistSummary>() : null;
+            if (artist is null)
+            {
+                _failed = true;
+                return;
+            }
+
+            await ManagedArtists.LoadAsync();
+            Navigation.NavigateTo($"my-artists/{artist.Id}/{artist.Slug}");
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _creating = false;
+        }
+    }
+}

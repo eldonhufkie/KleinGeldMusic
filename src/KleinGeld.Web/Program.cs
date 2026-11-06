@@ -20,6 +20,9 @@ builder.Services.AddHealthChecks()
 builder.AddMemberAuthentication();
 builder.AddEmailSender();
 
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IManagedArtistsState, ServerManagedArtistsState>();
+
 builder.Services.AddProblemDetails();
 // Checks API request bodies against their DataAnnotations and answers 400 with the errors.
 builder.Services.AddValidation();
@@ -51,6 +54,7 @@ app.MapDefaultEndpoints();
 app.MapTestingEndpoints();
 app.MapGroup("/api").MapJoinRequestEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapMemberEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapArtistEndpoints();
 var adminApi = app.MapGroup("/api/admin").RequireAuthorization(admin => admin.RequireRole(Roles.Admin));
 adminApi.MapAdminJoinRequestEndpoints();
 adminApi.MapAdminMemberEndpoints();
