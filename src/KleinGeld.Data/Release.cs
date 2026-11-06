@@ -26,4 +26,7 @@ public sealed class Release
     public string? Genre { get; set; }
 
     public ReleaseStage Stage { get; set; } = ReleaseStage.Draft;
+
+    /// <summary>Names the blobs of the current cover art; null until one is uploaded.</summary>
+    public Guid? CoverId { get; set; }
 }

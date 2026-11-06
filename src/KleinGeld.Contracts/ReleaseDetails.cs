@@ -11,4 +11,5 @@ public sealed record ReleaseDetails(
     DateOnly ReleaseDate,
     string? Description,
     string? Genre,
-    ReleaseStage Stage);
+    ReleaseStage Stage,
+    CoverArt? Cover = null);
