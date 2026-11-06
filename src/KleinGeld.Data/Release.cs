@@ -29,4 +29,6 @@ public sealed class Release
 
     /// <summary>Names the blobs of the current cover art; null until one is uploaded.</summary>
     public Guid? CoverId { get; set; }
+
+    public List<Track> Tracks { get; init; } = [];
 }

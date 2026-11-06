@@ -1,7 +1,7 @@
 // Sends the file chosen in a file input straight to blob storage through an upload link. XMLHttpRequest, because
 // fetch can't report upload progress. Resolves to whether storage accepted the file.
-export function upload(input, url, progress) {
-    const file = input.files[0];
+export function upload(input, url, progress, index = 0) {
+    const file = input.files[index];
     return new Promise(resolve => {
         const request = new XMLHttpRequest();
         request.open("PUT", url);
@@ -16,4 +16,12 @@ export function upload(input, url, progress) {
         request.onerror = () => resolve(false);
         request.send(file);
     });
+}
+
+export function chosenFiles(input) {
+    return Array.from(input.files, file => ({ name: file.name, size: file.size }));
+}
+
+export function clear(input) {
+    input.value = "";
 }

@@ -33,6 +33,16 @@ internal sealed class BlobLinks(BlobServiceClient blobs, TimeProvider clock, ICo
         return AsSeenByBrowsers(blob.GenerateSasUri(BlobSasPermissions.Read, clock.GetUtcNow() + lifetime));
     }
 
+    public BlobClient Blob(string container, string blobName) =>
+        blobs.GetBlobContainerClient(container).GetBlobClient(blobName);
+
+    /// <summary>
+    /// A link for this server's own tools, such as ffprobe, so it keeps the address this host uses. Never hand it to
+    /// a browser. Blob storage checks expiry against its own clock, which the app's clock may not match in tests.
+    /// </summary>
+    public Uri ForServerReading(string container, string blobName) =>
+        Blob(container, blobName).GenerateSasUri(BlobSasPermissions.Read, DateTimeOffset.UtcNow.AddMinutes(5));
+
     /// <summary>The Test copy's Azurite is reached at another address by browsers than by this host.</summary>
     private Uri AsSeenByBrowsers(Uri url)
     {

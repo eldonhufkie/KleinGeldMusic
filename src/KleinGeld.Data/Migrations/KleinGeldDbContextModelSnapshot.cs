@@ -221,6 +221,40 @@ namespace KleinGeld.Data.Migrations
                     b.ToTable("Releases");
                 });
 
+            modelBuilder.Entity("KleinGeld.Data.Track", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OriginalBlobName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ReleaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReleaseId");
+
+                    b.ToTable("Tracks");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
                 {
                     b.Property<Guid>("Id")
@@ -397,6 +431,17 @@ namespace KleinGeld.Data.Migrations
                     b.Navigation("Artist");
                 });
 
+            modelBuilder.Entity("KleinGeld.Data.Track", b =>
+                {
+                    b.HasOne("KleinGeld.Data.Release", "Release")
+                        .WithMany("Tracks")
+                        .HasForeignKey("ReleaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Release");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", null)
@@ -502,6 +547,11 @@ namespace KleinGeld.Data.Migrations
             modelBuilder.Entity("KleinGeld.Data.Artist", b =>
                 {
                     b.Navigation("Releases");
+                });
+
+            modelBuilder.Entity("KleinGeld.Data.Release", b =>
+                {
+                    b.Navigation("Tracks");
                 });
 #pragma warning restore 612, 618
         }

@@ -74,9 +74,10 @@ internal static class ReleaseEndpoints
             return Results.Ok(release.ToDetails(covers));
         });
 
-        api.MapDelete("/releases/{id:guid}", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers) =>
+        api.MapDelete("/releases/{id:guid}", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers, BlobLinks links) =>
         {
             var release = await db.Releases
+                .Include(r => r.Tracks)
                 .Where(r => r.Id == id)
                 .ManagedBy(caller.MemberId())
                 .SingleOrDefaultAsync();
@@ -88,6 +89,11 @@ internal static class ReleaseEndpoints
             db.Releases.Remove(release);
             await db.SaveChangesAsync();
             await covers.DeleteAllAsync(id);
+
+            foreach (var track in release.Tracks)
+            {
+                await links.Blob(TrackEndpoints.AudioContainer, track.OriginalBlobName).DeleteIfExistsAsync();
+            }
 
             return Results.NoContent();
         });
