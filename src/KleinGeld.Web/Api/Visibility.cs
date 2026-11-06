@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Security.Claims;
 using KleinGeld.Contracts;
 using KleinGeld.Data;
@@ -10,6 +11,13 @@ namespace KleinGeld.Web.Api;
 /// </summary>
 internal static class Visibility
 {
+    /// <summary>What a listener sees of an Artist's Releases, for lists that are the same whoever asks.</summary>
+    public static readonly Expression<Func<Release, bool>> IsPublished = r => r.Stage == ReleaseStage.Published;
+
+    /// <summary>The Artists every Member sees, for lists that are the same whoever asks.</summary>
+    public static IQueryable<Artist> WithPublishedRelease(this IQueryable<Artist> artists) =>
+        artists.Where(a => a.Releases.Any(r => r.Stage == ReleaseStage.Published));
+
     public static IQueryable<Release> VisibleTo(this IQueryable<Release> releases, ClaimsPrincipal caller)
     {
         if (caller.IsInRole(Roles.Admin))

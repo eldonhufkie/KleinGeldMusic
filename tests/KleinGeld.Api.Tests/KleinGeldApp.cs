@@ -90,6 +90,14 @@ public sealed class KleinGeldApp : IAsyncLifetime
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>Adds Artists with a Published Release straight to the database, for lists longer than one load.</summary>
+    public async Task SeedPublishedArtistsAsync(IEnumerable<string> names)
+    {
+        using var client = CreateWebClient();
+        using var response = await client.PostAsJsonAsync("/testing/published-artists", names);
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task DisposeAsync()
     {
         if (_app is not null)
