@@ -26,4 +26,6 @@ public sealed class Release
     public string? Genre { get; set; }
 
     public ReleaseStage Stage { get; set; } = ReleaseStage.Draft;
+
+    public List<Track> Tracks { get; init; } = [];
 }

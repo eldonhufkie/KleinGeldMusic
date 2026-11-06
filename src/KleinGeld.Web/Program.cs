@@ -14,6 +14,8 @@ builder.AddClock();
 builder.AddNpgsqlDbContext<KleinGeldDbContext>("kleingeld", settings => settings.DisableRetry = false);
 builder.AddAzureBlobServiceClient("blobs");
 builder.Services.AddHostedService<BlobCorsSetup>();
+builder.Services.AddSingleton<KleinGeld.Web.Blobs.BlobLinks>();
+builder.Services.AddSingleton<KleinGeld.Web.Blobs.AudioProbe>();
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseMigratedHealthCheck>("database-migrated");
 
@@ -56,6 +58,7 @@ app.MapGroup("/api").MapJoinRequestEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapMemberEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapArtistEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapReleaseEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapTrackEndpoints();
 var adminApi = app.MapGroup("/api/admin").RequireAuthorization(admin => admin.RequireRole(Roles.Admin));
 adminApi.MapAdminJoinRequestEndpoints();
 adminApi.MapAdminMemberEndpoints();

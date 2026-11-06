@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using KleinGeld.Contracts;
 using KleinGeld.Data;
+using KleinGeld.Web.Blobs;
 using Microsoft.EntityFrameworkCore;
 
 namespace KleinGeld.Web.Api;
@@ -73,9 +74,10 @@ internal static class ReleaseEndpoints
             return Results.Ok(release.ToDetails());
         });
 
-        api.MapDelete("/releases/{id:guid}", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        api.MapDelete("/releases/{id:guid}", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links) =>
         {
             var release = await db.Releases
+                .Include(r => r.Tracks)
                 .Where(r => r.Id == id)
                 .ManagedBy(caller.MemberId())
                 .SingleOrDefaultAsync();
@@ -87,11 +89,16 @@ internal static class ReleaseEndpoints
             db.Releases.Remove(release);
             await db.SaveChangesAsync();
 
+            foreach (var track in release.Tracks)
+            {
+                await links.Blob(TrackEndpoints.AudioContainer, track.OriginalBlobName).DeleteIfExistsAsync();
+            }
+
             return Results.NoContent();
         });
     }
 
-    private static IQueryable<Release> ManagedBy(this IQueryable<Release> releases, Guid memberId) =>
+    internal static IQueryable<Release> ManagedBy(this IQueryable<Release> releases, Guid memberId) =>
         releases.Where(r => r.Artist.Managers.Any(m => m.Id == memberId));
 
     private static void Fill(this Release release, ReleaseForm form)
