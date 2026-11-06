@@ -52,6 +52,7 @@ export function attach(element, dotNet) {
     for (const event of ["timeupdate", "durationchange", "play", "pause", "ended", "seeked"]) {
         audio.addEventListener(event, report);
     }
+    audio.addEventListener("ended", () => listener.invokeMethodAsync("End"));
     listenForMediaKeys();
 }
 

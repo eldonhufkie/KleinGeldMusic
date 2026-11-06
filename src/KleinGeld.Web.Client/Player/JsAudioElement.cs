@@ -13,6 +13,8 @@ public sealed class JsAudioElement(IJSRuntime js) : IAudioElement, IAsyncDisposa
 
     public event Func<MediaCommand, Task>? MediaCommanded;
 
+    public event Func<Task>? Ended;
+
     public async Task AttachAsync(ElementReference element)
     {
         _self = DotNetObjectReference.Create(this);
@@ -40,6 +42,9 @@ public sealed class JsAudioElement(IJSRuntime js) : IAudioElement, IAsyncDisposa
     public Task Command(string action, double position) =>
         MediaCommanded?.Invoke(new MediaCommand(Enum.Parse<MediaAction>(action), TimeSpan.FromSeconds(position)))
         ?? Task.CompletedTask;
+
+    [JSInvokable]
+    public Task End() => Ended?.Invoke() ?? Task.CompletedTask;
 
     public async ValueTask DisposeAsync()
     {

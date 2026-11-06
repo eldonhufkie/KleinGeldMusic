@@ -20,7 +20,9 @@
         @if (Player.Current is not null)
         {
             <button type="button" class="player-close" @onclick="Player.CloseFullPlayer">Close</button>
+            <button type="button" class="player-step" @onclick="Player.PreviousAsync">Previous</button>
             <button type="button" @onclick="ToggleAsync">@(Player.IsPlaying ? "Pause" : "Play")</button>
+            <button type="button" class="player-step" @onclick="Player.NextAsync">Next</button>
             <span class="player-title">@Player.Current.Title</span>
             <button type="button" class="player-open" aria-label="Open the full player"
                     @onclick="Player.OpenFullPlayer">@Player.Current.Title</button>
@@ -30,6 +32,27 @@
                    value="@((int)(_seekingTo ?? Player.Position).TotalSeconds)"
                    @oninput="ShowSeeking" @onchange="SeekAsync" />
             <span class="player-time">@Format(Player.Duration)</span>
+            <button type="button" class="player-step" aria-expanded="@(_queueOpen ? "true" : "false")"
+                    @onclick="() => _queueOpen = !_queueOpen">Up next</button>
+            @if (_queueOpen)
+            {
+                @* By index, not by id: the same Track can be in the Queue twice. *@
+                <ol class="queue-panel" aria-label="Up next">
+                    @for (var i = 0; i < Player.Queue.Count; i++)
+                    {
+                        var index = i;
+                        var track = Player.Queue[index];
+                        <li aria-current="@(index == Player.CurrentIndex ? "true" : null)">
+                            <span class="queue-track">@track.Title · @track.Artist</span>
+                            @if (index != Player.CurrentIndex)
+                            {
+                                <button type="button" aria-label="Remove @track.Title from the Queue"
+                                        @onclick="() => Player.RemoveFromQueue(index)">Remove</button>
+                            }
+                        </li>
+                    }
+                </ol>
+            }
         }
     </section>
 }
@@ -39,6 +62,8 @@
 
     // While the handle is dragged it follows the Member, not the audio.
     private TimeSpan? _seekingTo;
+
+    private bool _queueOpen;
 
     protected override void OnInitialized() => Player.Changed += Refresh;
 
