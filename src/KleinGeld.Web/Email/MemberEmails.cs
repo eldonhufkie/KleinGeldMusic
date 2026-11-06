@@ -1,3 +1,4 @@
+using KleinGeld.Data;
 using MimeKit;
 
 namespace KleinGeld.Web.Email;
@@ -58,5 +59,14 @@ internal static class MemberEmails
             confirmLink.ToString(),
             "",
             "The link works for 15 minutes. If you didn't ask for this, you can ignore this email.",
+        ]));
+
+    /// <summary>Email 7: the Admin approved a Release of an Artist the Member manages.</summary>
+    public static OutgoingEmail ReleaseApproved(MailboxAddress manager, Release release) =>
+        new(manager, $"{release.Title} is Published", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin approved \"{release.Title}\" by {release.Artist.Name}. It's Published: every Member can now listen to it.",
         ]));
 }

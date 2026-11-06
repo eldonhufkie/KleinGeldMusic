@@ -1,6 +1,10 @@
 using KleinGeld.Contracts;
 using KleinGeld.Data;
+using KleinGeld.Web.Blobs;
+using KleinGeld.Web.Email;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using MimeKit;
 
 namespace KleinGeld.Web.Api;
 
@@ -34,6 +38,58 @@ internal static class AdminReviewEndpoints
                 })
                 .OrderBy(r => r.SubmittedAt)
                 .ToList();
+        });
+
+        api.MapPost("/review/releases/{id:guid}/approve", async (
+            Guid id,
+            KleinGeldDbContext db,
+            CoverStore covers,
+            TimeProvider clock,
+            UserManager<Member> members,
+            EmailSender emails,
+            ILoggerFactory loggers) =>
+        {
+            Release? approved = null;
+            var refused = await db.WithReviewedReleaseLockedAsync(id, async release =>
+            {
+                if (release.Stage != ReleaseStage.Submitted)
+                {
+                    return Results.Problem("Only a Submitted Release can be approved.", statusCode: StatusCodes.Status409Conflict);
+                }
+
+                release.Stage = ReleaseStage.Published;
+                release.PublishedAt ??= clock.GetUtcNow();
+                await db.SaveChangesAsync();
+                approved = release;
+                return null;
+            });
+            if (refused is not null)
+            {
+                return refused;
+            }
+
+            // The Release is Published whatever happens here: Members can already play it even if the email fails.
+            try
+            {
+                var adminIds = (await members.GetUsersInRoleAsync(Roles.Admin)).Select(a => a.Id).ToList();
+                var addresses = await db.Artists
+                    .Where(a => a.Id == approved!.ArtistId)
+                    .SelectMany(a => a.Managers)
+                    .Where(m => !adminIds.Contains(m.Id))
+                    .Select(m => m.Email!)
+                    .ToListAsync();
+
+                foreach (var address in addresses)
+                {
+                    await emails.SendAsync(MemberEmails.ReleaseApproved(new MailboxAddress(null, address), approved!));
+                }
+            }
+            catch (Exception exception)
+            {
+                loggers.CreateLogger(typeof(AdminReviewEndpoints)).LogError(exception, "Couldn't email the managers of Release {ReleaseId}.", id);
+            }
+
+            return Results.Ok(approved!.ToDetails(covers));
         });
     }
 
