@@ -81,7 +81,7 @@ internal static class TrackEndpoints
         });
 
         api.MapPost("/releases/{id:guid}/tracks/{trackId:guid}/confirm", async (
-            Guid id, Guid trackId, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links, AudioProbe probe) =>
+            Guid id, Guid trackId, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links, AudioProbe probe, TagReader tagReader, CoverStore covers) =>
         {
             var memberId = caller.MemberId();
             var track = await db.Tracks
@@ -94,7 +94,7 @@ internal static class TrackEndpoints
             }
             if (track.Status != TrackStatus.Uploading)
             {
-                return Results.Ok(ToSummary(track));
+                return Results.Ok(new TrackConfirmation(ToSummary(track)));
             }
 
             long size;
@@ -108,13 +108,14 @@ internal static class TrackEndpoints
             }
 
             // The size the browser declared proves nothing, and a SAS link can't limit what is uploaded to it.
-            var problem = size > TrackUploadForm.MaxFileSize
-                ? "A Track's file can be at most 500 MB."
-                : await probe.IsAcceptedAudioAsync(links.ForServerReading(AudioContainer, track.OriginalBlobName))
-                    ? null
-                    : "That file isn't audio we accept. Use FLAC, WAV, AIFF, ALAC, MP3 or AAC.";
-            if (problem is not null)
+            var format = size > TrackUploadForm.MaxFileSize
+                ? null
+                : await probe.AcceptedFormatAsync(links.ForServerReading(AudioContainer, track.OriginalBlobName));
+            if (format is null)
             {
+                var problem = size > TrackUploadForm.MaxFileSize
+                    ? "A Track's file can be at most 500 MB."
+                    : "That file isn't audio we accept. Use FLAC, WAV, AIFF, ALAC, MP3 or AAC.";
                 if (track.IsReplacingFailedAudio)
                 {
                     track.Status = TrackStatus.Failed;
@@ -128,10 +129,39 @@ internal static class TrackEndpoints
                 return Results.Problem(problem, statusCode: StatusCodes.Status422UnprocessableEntity);
             }
 
-            track.Status = TrackStatus.Converting;
-            track.IsReplacingFailedAudio = false;
-            await db.SaveChangesAsync();
-            return Results.Ok(ToSummary(track));
+            var tags = await tagReader.ReadAsync(track.OriginalBlobName, format);
+
+            // Before taking the lock: this is the slow part. A cover that loses a race is an orphan for the clean-up.
+            Guid? coverId = null;
+            string? note = null;
+            if (track.Position == 1 && tags.Cover is not null && await db.Releases.AnyAsync(r => r.Id == id && r.CoverId == null))
+            {
+                string? refusal;
+                (coverId, refusal) = await covers.AcceptEmbeddedAsync(id, tags.Cover);
+                note = refusal is null ? null : $"The cover art in the file was skipped. {refusal}";
+            }
+
+            Track? confirmed = null;
+            var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+            {
+                confirmed = release.Tracks.SingleOrDefault(t => t.Id == trackId);
+                if (confirmed is null)
+                {
+                    return Results.NotFound();
+                }
+
+                confirmed.Title = confirmed.TitleTyped ? confirmed.Title : tags.Title ?? confirmed.Title;
+                confirmed.Status = TrackStatus.Converting;
+                confirmed.IsReplacingFailedAudio = false;
+                if (confirmed.Position == 1)
+                {
+                    PreFill(release, tags);
+                    release.CoverId ??= coverId;
+                }
+                await db.SaveChangesAsync();
+                return null;
+            });
+            return refused ?? Results.Ok(new TrackConfirmation(ToSummary(confirmed!), note));
         });
 
         // Keeps the Track and its place; the new file then goes through the same upload and confirm as a new one.
@@ -211,6 +241,7 @@ internal static class TrackEndpoints
                     return Results.NotFound();
                 }
 
+                track.TitleTyped |= track.Title != form.Title.Trim();
                 track.Title = form.Title.Trim();
                 track.SingleMark = form.SingleMark;
                 track.FeaturedArtists = string.IsNullOrWhiteSpace(form.FeaturedArtists) ? null : form.FeaturedArtists.Trim();
@@ -299,6 +330,17 @@ internal static class TrackEndpoints
             }
             return refused;
         });
+
+    private static void PreFill(Release release, EmbeddedTags tags)
+    {
+        if (release.Title.Length == 0 && tags.Album is not null)
+        {
+            release.Title = tags.Album;
+            release.Slug = Slugs.From(release.Title);
+        }
+        release.ReleaseDate ??= tags.Date;
+        release.Genre ??= tags.Genre;
+    }
 
     private static string TitleFrom(string fileName)
     {

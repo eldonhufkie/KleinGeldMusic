@@ -12,14 +12,13 @@ public sealed class ReleaseForm
     public const int DescriptionMaxLength = 2000;
     public const int GenreMaxLength = 100;
 
-    [Required, StringLength(TitleMaxLength)]
+    [StringLength(TitleMaxLength)]
     public string Title { get; set; } = "";
 
     [Required(ErrorMessage = "Choose a Release type."), EnumDataType(typeof(ReleaseType))]
     public ReleaseType? Type { get; set; }
 
-    /// <summary>Display and sorting only, so it may be in the past.</summary>
-    [Required(ErrorMessage = "Enter a release date.")]
+    /// <summary>Display and sorting only, so it may be in the past. Blank is allowed on a Draft, like the title, for tags to fill.</summary>
     public DateOnly? ReleaseDate { get; set; }
 
     [StringLength(DescriptionMaxLength)]

@@ -14,7 +14,7 @@ internal sealed class AudioProbe(IConfiguration configuration)
 
     private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(1);
 
-    public async Task<bool> IsAcceptedAudioAsync(Uri link)
+    public async Task<string?> AcceptedFormatAsync(Uri link)
     {
         var start = new ProcessStartInfo(configuration["Ffprobe:Path"] ?? "ffprobe")
         {
@@ -34,22 +34,22 @@ internal sealed class AudioProbe(IConfiguration configuration)
         {
             var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
-            return process.ExitCode == 0 && IsAccepted(output);
+            return process.ExitCode == 0 ? AcceptedFormat(output) : null;
         }
         catch (OperationCanceledException)
         {
             process.Kill();
-            return false;
+            return null;
         }
     }
 
-    private static bool IsAccepted(string ffprobeOutput)
+    private static string? AcceptedFormat(string ffprobeOutput)
     {
         using var report = JsonDocument.Parse(ffprobeOutput);
         if (!report.RootElement.TryGetProperty("streams", out var streams)
             || !report.RootElement.TryGetProperty("format", out var format))
         {
-            return false;
+            return null;
         }
 
         var all = streams.EnumerateArray().ToList();
@@ -57,9 +57,8 @@ internal sealed class AudioProbe(IConfiguration configuration)
         // Embedded cover art is a video stream marked as an attached picture; a real video isn't a Track.
         var hasVideo = all.Any(s => s.GetProperty("codec_type").GetString() == "video" && !IsAttachedPicture(s));
 
-        return audio.Count == 1
-            && !hasVideo
-            && IsAcceptedCodec(format.GetProperty("format_name").GetString(), audio[0].GetProperty("codec_name").GetString());
+        var name = format.GetProperty("format_name").GetString();
+        return audio.Count == 1 && !hasVideo && IsAcceptedCodec(name, audio[0].GetProperty("codec_name").GetString()) ? name : null;
     }
 
     private static bool IsAttachedPicture(JsonElement stream) =>
