@@ -88,6 +88,11 @@ internal static class ArtistEndpoints
                             .Select(r => r.Name)
                             .FirstOrDefault(),
                     }).ToList(),
+                    Releases = a.Releases
+                        .OrderByDescending(r => r.ReleaseDate)
+                        .ThenByDescending(r => r.Id)
+                        .Select(r => new ManagedRelease(r.Id, r.Title, r.Slug, r.Type, r.ReleaseDate, r.Stage))
+                        .ToList(),
                 })
                 .SingleOrDefaultAsync();
 
@@ -104,16 +109,9 @@ internal static class ArtistEndpoints
                 .Select(m => new ArtistManager(m.Id, m.Name ?? m.Email!))
                 .OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            return Results.Ok(new ManagedArtist(artist.Id, artist.Name, artist.Slug, managers, Releases: []));
+            return Results.Ok(new ManagedArtist(artist.Id, artist.Name, artist.Slug, managers, artist.Releases));
         });
     }
-
-    /// <summary>
-    /// The visibility rule for Artists: the Admin and an Artist's managing Members see it. Every other Member will
-    /// see it once it has a Published Release, which belongs here when Releases exist.
-    /// </summary>
-    private static IQueryable<Artist> VisibleTo(this IQueryable<Artist> artists, ClaimsPrincipal caller) =>
-        caller.IsInRole(Roles.Admin) ? artists : artists.ManagedBy(caller.MemberId());
 
     public static IQueryable<Artist> ManagedBy(this IQueryable<Artist> artists, Guid memberId) =>
         artists.Where(a => a.Managers.Any(m => m.Id == memberId));
