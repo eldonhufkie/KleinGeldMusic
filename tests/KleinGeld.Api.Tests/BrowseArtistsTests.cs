@@ -14,14 +14,62 @@ public sealed partial class SubmitReleaseTests
         var names = Enumerable.Range(0, 49).Select(i => $"Reeks {tag} {i:00}").ToList();
         await app.SeedPublishedArtistsAsync(names);
 
-        var first = await ReadArtistsAsync(member, 0);
-        var rest = await ReadAllArtistsAsync(member, 48);
+        var first = await ReadArtistsAsync(member);
+        var all = await ReadAllArtistsAsync(member);
 
         Assert.Equal(48, first.Artists.Count);
-        Assert.True(first.HasMore);
-        List<ArtistCard> all = [.. first.Artists, .. rest];
+        Assert.NotNull(first.Next);
         Assert.Equal(all.Count, all.DistinctBy(a => a.Id).Count());
         Assert.Equal(names, all.Where(a => a.Name.Contains(tag)).Select(a => a.Name));
+    }
+
+    [Fact]
+    public async Task Paging_through_Artists_that_tie_skips_and_repeats_nothing()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+        var name = $"Gelijk {Guid.NewGuid():N}";
+        await app.SeedPublishedArtistsAsync(Enumerable.Repeat(name, 60));
+
+        var all = await ReadAllArtistsAsync(member);
+
+        Assert.Equal(all.Count, all.DistinctBy(a => a.Id).Count());
+        Assert.Equal(60, all.Count(a => a.Name == name));
+    }
+
+    [Fact]
+    public async Task An_Artist_appearing_earlier_in_the_list_shifts_nothing_on_the_next_page()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+        var tag = Guid.NewGuid().ToString("N");
+        await app.SeedPublishedArtistsAsync(Enumerable.Range(0, 49).Select(i => $"Reeks {i:00} {tag}"));
+        var pages = new List<ArtistList> { await ReadArtistsAsync(member) };
+        while (!pages[^1].Artists.Any(a => a.Name.Contains(tag)) && pages[^1].Next is not null)
+        {
+            pages.Add(await ReadArtistsAsync(member, pages[^1].Next));
+        }
+
+        await app.SeedPublishedArtistsAsync([$"000 {tag}"]);
+        var seen = pages.SelectMany(p => p.Artists).ToList();
+        for (var after = pages[^1].Next; after is not null;)
+        {
+            var page = await ReadArtistsAsync(member, after);
+            seen.AddRange(page.Artists);
+            after = page.Next;
+        }
+
+        Assert.Equal(seen.Count, seen.DistinctBy(a => a.Id).Count());
+    }
+
+    [Theory]
+    [InlineData("not a cursor")]
+    [InlineData("e30")]
+    public async Task A_broken_paging_position_is_refused_by_the_Artists_grid(string after)
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+
+        using var response = await member.GetAsync($"/api/artists?after={Uri.EscapeDataString(after)}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
@@ -31,7 +79,7 @@ public sealed partial class SubmitReleaseTests
         var tag = Guid.NewGuid().ToString("N");
         await app.SeedPublishedArtistsAsync([$"{tag} Zebra", $"{tag} Éik", $"{tag} appel"]);
 
-        var artists = await ReadAllArtistsAsync(member, 0);
+        var artists = await ReadAllArtistsAsync(member);
 
         Assert.Equal(
             [$"{tag} appel", $"{tag} Éik", $"{tag} Zebra"],
@@ -46,12 +94,12 @@ public sealed partial class SubmitReleaseTests
         var release = await CreateCompleteDraftAsync(manager);
         using var submitted = await SubmitAsync(manager, release);
 
-        Assert.DoesNotContain(await ReadAllArtistsAsync(manager, 0), a => a.Id == release.ArtistId);
-        Assert.DoesNotContain(await ReadAllArtistsAsync(admin, 0), a => a.Id == release.ArtistId);
+        Assert.DoesNotContain(await ReadAllArtistsAsync(manager), a => a.Id == release.ArtistId);
+        Assert.DoesNotContain(await ReadAllArtistsAsync(admin), a => a.Id == release.ArtistId);
 
         using var approved = await ApproveAsync(admin, release);
 
-        Assert.Contains(await ReadAllArtistsAsync(manager, 0), a => a.Id == release.ArtistId);
+        Assert.Contains(await ReadAllArtistsAsync(manager), a => a.Id == release.ArtistId);
     }
 
     [Fact]
@@ -76,7 +124,7 @@ public sealed partial class SubmitReleaseTests
         var draft = await CreateReleaseAsync(manager, artist, ReleaseType.Album, new DateOnly(2030, 1, 1));
         await SetCoverAsync(manager, draft);
 
-        var card = (await ReadAllArtistsAsync(manager, 0)).Single(a => a.Id == artist.Id);
+        var card = (await ReadAllArtistsAsync(manager)).Single(a => a.Id == artist.Id);
 
         Assert.Contains(newest.Id.ToString(), card.Cover!.Small.AbsolutePath);
     }
@@ -103,7 +151,7 @@ public sealed partial class SubmitReleaseTests
     }
 
     [Fact]
-    public async Task The_Artist_page_is_a_listeners_view_even_for_its_managers_and_the_Admin()
+    public async Task The_Artist_page_is_what_any_Member_sees_even_for_its_managers_and_the_Admin()
     {
         using var manager = await app.LoginAsNewMemberAsync();
         using var admin = await app.LoginAsAdminAsync();
@@ -175,20 +223,21 @@ public sealed partial class SubmitReleaseTests
     private static async Task<ArtistDetails> ReadArtistAsync(HttpClient member, ArtistSummary artist) =>
         (await member.GetFromJsonAsync<ArtistDetails>($"/api/artists/{artist.Id}/{artist.Slug}"))!;
 
-    private static async Task<ArtistList> ReadArtistsAsync(HttpClient member, int skip) =>
-        (await member.GetFromJsonAsync<ArtistList>($"/api/artists?skip={skip}"))!;
+    private static async Task<ArtistList> ReadArtistsAsync(HttpClient member, string? after = null) =>
+        (await member.GetFromJsonAsync<ArtistList>(after is null ? "/api/artists" : $"/api/artists?after={after}"))!;
 
-    /// <summary>Every test shares one app, so the grid may hold more than one load of other tests' Artists.</summary>
-    private static async Task<List<ArtistCard>> ReadAllArtistsAsync(HttpClient member, int skip)
+    /// <summary>Every test shares one app, so the grid may hold more than one page of other tests' Artists.</summary>
+    private static async Task<List<ArtistCard>> ReadAllArtistsAsync(HttpClient member)
     {
         List<ArtistCard> artists = [];
-        ArtistList load;
+        string? after = null;
         do
         {
-            load = await ReadArtistsAsync(member, skip + artists.Count);
-            artists.AddRange(load.Artists);
+            var page = await ReadArtistsAsync(member, after);
+            artists.AddRange(page.Artists);
+            after = page.Next;
         }
-        while (load.HasMore);
+        while (after is not null);
         return artists;
     }
 }

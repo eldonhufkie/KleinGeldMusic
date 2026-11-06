@@ -41,14 +41,14 @@ else if (!_loaded && _problem is null)
     }
 </ul>
 
-@if (_hasMore)
+@if (_next is not null)
 {
     <p><button type="button" disabled="@_loading" @onclick="LoadAsync">Load more</button></p>
 }
 
 @code {
     private readonly List<ArtistCard> _artists = [];
-    private bool _hasMore;
+    private string? _next;
     private bool _loaded;
     private bool _loading;
     private string? _problem;
@@ -61,9 +61,9 @@ else if (!_loaded && _problem is null)
         _problem = null;
         try
         {
-            var load = await Http.GetFromJsonAsync<ArtistList>($"api/artists?skip={_artists.Count}");
-            _artists.AddRange(load!.Artists);
-            _hasMore = load.HasMore;
+            var page = await Http.GetFromJsonAsync<ArtistList>(_next is { } next ? $"api/artists?after={next}" : "api/artists");
+            _artists.AddRange(page!.Artists);
+            _next = page.Next;
             _loaded = true;
         }
         catch (HttpRequestException)

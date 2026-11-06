@@ -41,6 +41,34 @@ public sealed class ReleasesListTests(KleinGeldApp app)
         Assert.Equal([$"aardvark {tag}", $"Mol {tag}", $"Zebra {tag}"], titles);
     }
 
+    [Fact]
+    public async Task A_to_Z_ignores_accents_and_punctuation_whatever_the_databases_collation()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+        var artist = await CreateArtistAsync(member);
+        var tag = Guid.NewGuid().ToString("N");
+        await SeedAsync(artist, ReleaseType.EP,
+            new($"{tag} Zebra", LongAgo),
+            new($"{tag} Éik", LongAgo),
+            new($"{tag} (appel)", LongAgo));
+
+        var titles = (await ReadAllAsync(member, "/api/releases?sort=AZ")).Select(r => r.Title).Where(t => t.StartsWith(tag));
+
+        Assert.Equal([$"{tag} (appel)", $"{tag} Éik", $"{tag} Zebra"], titles);
+    }
+
+    [Fact]
+    public async Task A_paging_position_from_before_A_to_Z_sorted_on_slugs_is_refused()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+        var old = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($$"""{"Id":"{{Guid.CreateVersion7()}}","Title":"Oud"}"""))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+        using var response = await member.GetAsync($"/api/releases?sort=AZ&after={old}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Theory]
     [InlineData(ReleaseType.Album)]
     [InlineData(ReleaseType.EP)]
