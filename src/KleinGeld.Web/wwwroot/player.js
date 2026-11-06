@@ -88,3 +88,16 @@ export function pause() {
 export function seek(seconds) {
     audio.currentTime = seconds;
 }
+
+export async function playFrom(source, seconds) {
+    audio.addEventListener("loadedmetadata", () => { audio.currentTime = seconds; }, { once: true });
+    await play(source);
+}
+
+export function setVolume(volume) {
+    audio.volume = volume;
+}
+
+export function setMuted(muted) {
+    audio.muted = muted;
+}

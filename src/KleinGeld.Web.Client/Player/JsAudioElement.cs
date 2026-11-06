@@ -30,6 +30,13 @@ public sealed class JsAudioElement(IJSRuntime js) : IAudioElement, IAsyncDisposa
 
     public Task SeekAsync(TimeSpan position) => Module.InvokeVoidAsync("seek", position.TotalSeconds).AsTask();
 
+    public Task PlayFromAsync(string source, TimeSpan position) =>
+        Module.InvokeVoidAsync("playFrom", source, position.TotalSeconds).AsTask();
+
+    public Task SetVolumeAsync(double volume) => Module.InvokeVoidAsync("setVolume", volume).AsTask();
+
+    public Task SetMutedAsync(bool muted) => Module.InvokeVoidAsync("setMuted", muted).AsTask();
+
     public Task ShowMetadataAsync(MediaMetadata metadata) =>
         Module.InvokeVoidAsync(
             "showMetadata", metadata.Title, metadata.Artist, metadata.Cover?.Small, metadata.Cover?.Large).AsTask();
