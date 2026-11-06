@@ -32,16 +32,20 @@
                    value="@((int)(_seekingTo ?? Player.Position).TotalSeconds)"
                    @oninput="ShowSeeking" @onchange="SeekAsync" />
             <span class="player-time">@Format(Player.Duration)</span>
+            <button type="button" class="player-step" aria-pressed="@(Player.Shuffle ? "true" : "false")"
+                    @onclick="() => Player.SetShuffle(!Player.Shuffle)">Shuffle</button>
+            <button type="button" class="player-step" @onclick="NextRepeat">Repeat: @Player.Repeat.ToString().ToLowerInvariant()</button>
             <button type="button" class="player-step" aria-expanded="@(_queueOpen ? "true" : "false")"
                     @onclick="() => _queueOpen = !_queueOpen">Up next</button>
             @if (_queueOpen)
             {
                 @* By index, not by id: the same Track can be in the Queue twice. *@
+                var queue = Player.Queue;
                 <ol class="queue-panel" aria-label="Up next">
-                    @for (var i = 0; i < Player.Queue.Count; i++)
+                    @for (var i = 0; i < queue.Count; i++)
                     {
                         var index = i;
-                        var track = Player.Queue[index];
+                        var track = queue[index];
                         <li aria-current="@(index == Player.CurrentIndex ? "true" : null)">
                             <span class="queue-track">@track.Title · @track.Artist</span>
                             @if (index != Player.CurrentIndex)
@@ -80,6 +84,13 @@
     private void Refresh() => _ = InvokeAsync(StateHasChanged);
 
     private Task ToggleAsync() => Player.IsPlaying ? Player.PauseAsync() : Player.ResumeAsync();
+
+    private void NextRepeat() => Player.SetRepeat(Player.Repeat switch
+    {
+        RepeatMode.Off => RepeatMode.All,
+        RepeatMode.All => RepeatMode.One,
+        _ => RepeatMode.Off,
+    });
 
     private void ShowSeeking(ChangeEventArgs e) => _seekingTo = Seconds(e);
 

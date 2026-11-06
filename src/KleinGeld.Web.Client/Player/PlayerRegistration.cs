@@ -12,6 +12,7 @@ public static class PlayerRegistration
     {
         services.AddScoped<JsAudioElement>();
         services.AddScoped<IAudioElement>(provider => provider.GetRequiredService<JsAudioElement>());
+        services.AddSingleton<IShuffler, RandomShuffler>();
         services.AddScoped<PlayerService>();
     }
 }
