@@ -64,6 +64,6 @@
         }
 
         await SignInManager.RefreshSignInAsync(user);
-        message = "Thank you for confirming your email change.";
+        message = $"Your login email is now {Email}.";
     }
 }
