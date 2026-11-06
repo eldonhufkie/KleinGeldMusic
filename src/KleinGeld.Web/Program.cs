@@ -67,6 +67,7 @@ app.MapGroup("/api").MapJoinRequestEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapMemberEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapArtistEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapReleaseEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapReleaseListEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapTrackEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapCoverEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapSubmissionEndpoints();

@@ -44,6 +44,20 @@ public sealed class PhoneLayoutTests(KleinGeldApp app)
         Assert.DoesNotContain("href=\"admin\"", More(TabBar(await member.GetStringAsync("/Account/Manage"))));
     }
 
+    [Fact]
+    public async Task Releases_is_in_the_sidebar_and_a_tab_of_its_own()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+
+        var page = await member.GetStringAsync("/Account/Manage");
+
+        var sidebar = page[page.IndexOf("<nav class=\"sidebar\"", StringComparison.Ordinal)..page.IndexOf("<nav class=\"tab-bar\"", StringComparison.Ordinal)];
+        var tabBar = TabBar(page);
+        Assert.Contains(">Releases</a>", sidebar);
+        Assert.Contains(">Releases</a>", tabBar[..tabBar.IndexOf("<details", StringComparison.Ordinal)]);
+        Assert.DoesNotContain("Releases", More(tabBar));
+    }
+
     private static string TabBar(string page)
     {
         var start = page.IndexOf("<nav class=\"tab-bar\"", StringComparison.Ordinal);

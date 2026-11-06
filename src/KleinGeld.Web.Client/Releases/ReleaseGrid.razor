@@ -1,0 +1,26 @@
+@* A grid of Release covers, each linking to its Release. *@
+
+<ul class="release-grid">
+    @foreach (var release in Releases)
+    {
+        <li @key="release.Id">
+            <a href="releases/@release.Id/@release.Slug">
+                @if (release.Cover is { } cover)
+                {
+                    <img class="release-card-cover" src="@cover" alt="" loading="lazy" />
+                }
+                else
+                {
+                    <span class="release-card-cover"></span>
+                }
+                <span class="release-card-title">@release.Title</span>
+            </a>
+            <span class="release-card-artist">@release.ArtistName</span>
+        </li>
+    }
+</ul>
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<ReleaseCard> Releases { get; set; } = [];
+}
