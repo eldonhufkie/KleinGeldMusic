@@ -32,6 +32,24 @@ public sealed class PlayerServiceTests
     }
 
     [Fact]
+    public async Task The_mini_player_opens_the_full_player_and_the_music_plays_on_when_it_closes()
+    {
+        await _player.PlayAsync(Track);
+        Assert.False(_player.IsFullPlayerOpen);
+        var changes = 0;
+        _player.Changed += () => changes++;
+
+        _player.OpenFullPlayer();
+        Assert.True(_player.IsFullPlayerOpen);
+
+        _player.CloseFullPlayer();
+        Assert.False(_player.IsFullPlayerOpen);
+        Assert.True(_player.IsPlaying);
+        Assert.Equal(Track, _player.Current);
+        Assert.Equal(2, changes);
+    }
+
+    [Fact]
     public async Task Pausing_pauses_the_audio_and_keeps_the_Track()
     {
         await _player.PlayAsync(Track);
