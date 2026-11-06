@@ -66,6 +66,7 @@
 
     private async Task OnValidSubmitAsync()
     {
+        Input.NewEmail = Input.NewEmail?.Trim();
         if (Input.NewEmail is null || Input.NewEmail == email)
         {
             message = "Your email is unchanged.";
@@ -78,16 +79,21 @@
             return;
         }
 
-        var code = await UserManager.GenerateChangeEmailTokenAsync(user, Input.NewEmail);
-        var link = new Uri(QueryHelpers.AddQueryString(
-            new Uri(new Uri(NavigationManager.BaseUri), "/Account/ConfirmEmailChange").ToString(),
-            new Dictionary<string, string?>
-            {
-                ["userId"] = user.Id.ToString(),
-                ["email"] = Input.NewEmail,
-                ["code"] = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code)),
-            }));
-        await EmailSender.SendAsync(MemberEmails.ConfirmNewEmail(new MailboxAddress("", Input.NewEmail), link));
+        // The same answer when the address belongs to another Member, so the page doesn't reveal who is one.
+        var owner = await UserManager.FindByEmailAsync(Input.NewEmail);
+        if (owner is null || owner.Id == user.Id)
+        {
+            var code = await UserManager.GenerateChangeEmailTokenAsync(user, Input.NewEmail);
+            var link = new Uri(QueryHelpers.AddQueryString(
+                new Uri(new Uri(NavigationManager.BaseUri), "/Account/ConfirmEmailChange").ToString(),
+                new Dictionary<string, string?>
+                {
+                    ["userId"] = user.Id.ToString(),
+                    ["email"] = Input.NewEmail,
+                    ["code"] = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code)),
+                }));
+            await EmailSender.SendAsync(MemberEmails.ConfirmNewEmail(new MailboxAddress("", Input.NewEmail), link));
+        }
 
         message = "We sent a link to the new address. Your login email changes once you open it; the link works for 15 minutes.";
     }

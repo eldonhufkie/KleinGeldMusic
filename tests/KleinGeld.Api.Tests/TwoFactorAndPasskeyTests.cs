@@ -11,20 +11,25 @@ namespace KleinGeld.Api.Tests;
 [Collection(KleinGeldAppCollection.Name)]
 public sealed partial class TwoFactorAndPasskeyTests(KleinGeldApp app)
 {
+    private DateTimeOffset _now;
+
     [Fact]
     public async Task Two_factor_can_be_turned_on_then_asks_for_a_code_at_login_and_can_be_turned_off()
     {
         // The code depends on the time, so the app's clock has to run close to the one this test computes it from.
-        await app.SetClockAsync(DateTimeOffset.UtcNow);
+        _now = DateTimeOffset.UtcNow;
+        await app.SetClockAsync(_now);
         using var admin = await app.LoginAsAdminAsync();
 
         var setupPage = await admin.GetStringAsync("/Account/Manage/EnableAuthenticator");
         var key = SharedKey().Match(setupPage).Groups["key"].Value.Replace(" ", "");
+        await AssertStillLoggedInAsync(admin);
         Assert.Contains("otpauth://totp/KleinGeld%20Music:", WebUtility.HtmlDecode(setupPage));
         var form = await IdentityForms.ReadAsync(admin, "/Account/Manage/EnableAuthenticator");
         form["Input.Code"] = CurrentCode(key);
         using var enabled = await admin.PostAsync("/Account/Manage/EnableAuthenticator", new FormUrlEncodedContent(form));
-        Assert.Contains("Your authenticator app has been verified", await enabled.Content.ReadAsStringAsync());
+        Assert.Contains("Put these codes in a safe place", await enabled.Content.ReadAsStringAsync());
+        await AssertStillLoggedInAsync(admin);
 
         try
         {
@@ -50,6 +55,7 @@ public sealed partial class TwoFactorAndPasskeyTests(KleinGeldApp app)
             var disable = await IdentityForms.ReadAsync(admin, "/Account/Manage/Disable2fa");
             using var disabled = await admin.PostAsync("/Account/Manage/Disable2fa", new FormUrlEncodedContent(disable));
             disabled.EnsureSuccessStatusCode();
+            await AssertStillLoggedInAsync(admin);
         }
 
         using var again = await app.LoginAsAdminAsync();
@@ -70,6 +76,18 @@ public sealed partial class TwoFactorAndPasskeyTests(KleinGeldApp app)
         using var options = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal(KleinGeldApp.AdminEmail, options.RootElement.GetProperty("user").GetProperty("name").GetString());
         Assert.NotEmpty(options.RootElement.GetProperty("challenge").GetString()!);
+    }
+
+    /// <summary>
+    /// Lets a second pass, so Identity re-checks the session's security stamp as it does on any real request, and
+    /// checks the session survived: these pages change the stamp, and a Member shouldn't be logged out for using them.
+    /// </summary>
+    private async Task AssertStillLoggedInAsync(HttpClient member)
+    {
+        _now = _now.AddSeconds(1);
+        await app.SetClockAsync(_now);
+        using var response = await member.GetAsync("/api/me");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     /// <summary>The six-digit code an authenticator app shows now (RFC 6238 with SHA-1 and 30-second steps).</summary>

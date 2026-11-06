@@ -8,6 +8,7 @@
 @using KleinGeld.Data
 
 @inject UserManager<Member> UserManager
+@inject SignInManager<Member> SignInManager
 @inject UrlEncoder UrlEncoder
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<EnableAuthenticator> Logger
@@ -36,14 +37,12 @@ else
                 </p>
             </li>
             <li>
-                <p>Scan the QR Code or enter this key <kbd>@sharedKey</kbd> into your two factor authenticator app. Spaces and casing do not matter.</p>
-                <div class="alert alert-info">Learn how to <a href="https://go.microsoft.com/fwlink/?Linkid=852423">enable QR code generation</a>.</div>
-                <div></div>
+                <p>Enter this key <kbd>@sharedKey</kbd> into your two factor authenticator app. Spaces and casing do not matter.</p>
                 <div data-url="@authenticatorUri"></div>
             </li>
             <li>
                 <p>
-                    Once you have scanned the QR code or input the key above, your two factor authentication app will provide you
+                    Once you have entered the key above, your two factor authentication app will provide you
                     with a unique code. Enter the code in the confirmation box below.
                 </p>
                 <div class="row">
@@ -115,6 +114,8 @@ else
         }
 
         await UserManager.SetTwoFactorEnabledAsync(user, true);
+        // Sessions are checked against the security stamp on every request, and this changed it.
+        await SignInManager.RefreshSignInAsync(user);
         var userId = await UserManager.GetUserIdAsync(user);
         Logger.LogInformation("User with ID '{UserId}' has enabled 2FA with an authenticator app.", userId);
 
@@ -137,6 +138,8 @@ else
         if (string.IsNullOrEmpty(unformattedKey))
         {
             await UserManager.ResetAuthenticatorKeyAsync(user);
+            // Sessions are checked against the security stamp on every request, and this changed it.
+            await SignInManager.RefreshSignInAsync(user);
             unformattedKey = await UserManager.GetAuthenticatorKeyAsync(user);
         }
 
@@ -168,7 +171,7 @@ else
         return string.Format(
             CultureInfo.InvariantCulture,
             AuthenticatorUriFormat,
-            UrlEncoder.Encode("Microsoft.AspNetCore.Identity.UI"),
+            UrlEncoder.Encode("KleinGeld Music"),
             UrlEncoder.Encode(email),
             unformattedKey);
     }
