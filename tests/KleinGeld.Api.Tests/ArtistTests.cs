@@ -6,6 +6,10 @@ namespace KleinGeld.Api.Tests;
 [Collection(KleinGeldAppCollection.Name)]
 public sealed class ArtistTests(KleinGeldApp app)
 {
+    // Unique per test: every test shares one app, so the list of Members holds everyone's Members.
+    private readonly string _anna = $"Anna {Guid.NewGuid():N}";
+    private readonly string _bram = $"Bram {Guid.NewGuid():N}";
+
     [Fact]
     public async Task A_Member_creates_an_Artist_and_becomes_its_managing_Member()
     {
@@ -114,6 +118,194 @@ public sealed class ArtistTests(KleinGeldApp app)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Fact]
+    public async Task A_managing_Member_adds_a_Member_picked_from_the_list_and_they_manage_at_once()
+    {
+        using var manager = await app.LoginAsNewMemberAsync(_anna);
+        using var bandmate = await app.LoginAsNewMemberAsync(_bram);
+        var artist = await CreateArtistAsync(manager, "De Band");
+
+        var candidates = await manager.GetFromJsonAsync<List<ArtistManager>>($"/api/artists/{artist.Id}/managers/candidates");
+        var picked = Assert.Single(candidates!, m => m.Name == _bram);
+        Assert.DoesNotContain(candidates!, m => m.Name == _anna);
+
+        using var added = await AddManagerAsync(manager, artist, picked.Id);
+
+        Assert.Equal(HttpStatusCode.NoContent, added.StatusCode);
+        var page = await bandmate.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+        Assert.Equal([_anna, _bram], page!.Managers.Select(m => m.Name));
+    }
+
+    [Fact]
+    public async Task Any_manager_makes_another_manager_Stop_managing()
+    {
+        using var manager = await app.LoginAsNewMemberAsync(_anna);
+        using var bandmate = await app.LoginAsNewMemberAsync(_bram);
+        var artist = await CreateArtistAsync(manager, "Twee Man Sterk");
+        var bandmateId = await AddAsManagerAsync(manager, artist, _bram);
+
+        // The one who was added has the same say as the one who created the Artist.
+        var page = await bandmate.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+        var creatorId = Assert.Single(page!.Managers, m => m.Name == _anna).Id;
+        using var stopped = await StopManagingAsync(bandmate, artist, creatorId);
+
+        Assert.Equal(HttpStatusCode.NoContent, stopped.StatusCode);
+        using var forCreator = await manager.GetAsync($"/api/my-artists/{artist.Id}/{artist.Slug}");
+        Assert.Equal(HttpStatusCode.NotFound, forCreator.StatusCode);
+        page = await bandmate.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+        Assert.Equal(bandmateId, Assert.Single(page!.Managers).Id);
+    }
+
+    [Fact]
+    public async Task A_manager_makes_themselves_Stop_managing()
+    {
+        using var manager = await app.LoginAsNewMemberAsync(_anna);
+        using var bandmate = await app.LoginAsNewMemberAsync(_bram);
+        var artist = await CreateArtistAsync(manager, "Ik Stop Ermee");
+        var bandmateId = await AddAsManagerAsync(manager, artist, _bram);
+
+        using var stopped = await StopManagingAsync(bandmate, artist, bandmateId);
+
+        Assert.Equal(HttpStatusCode.NoContent, stopped.StatusCode);
+        Assert.False((await bandmate.GetFromJsonAsync<MeResponse>("/api/me"))!.ManagesArtist);
+        var page = await manager.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+        Assert.Equal(_anna, Assert.Single(page!.Managers).Name);
+    }
+
+    [Fact]
+    public async Task The_last_manager_cant_Stop_managing_and_is_told_to_delete_the_Artist()
+    {
+        using var manager = await app.LoginAsNewMemberAsync(_anna);
+        var artist = await CreateArtistAsync(manager, "Solo");
+        var page = await manager.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+
+        using var refused = await StopManagingAsync(manager, artist, Assert.Single(page!.Managers).Id);
+
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        var problem = await refused.Content.ReadFromJsonAsync<Refusal>();
+        Assert.Contains("delete the Artist", problem!.Detail);
+        page = await manager.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+        Assert.Single(page!.Managers);
+    }
+
+    [Fact]
+    public async Task Two_managers_making_each_other_Stop_managing_at_once_leave_one_manager()
+    {
+        using var manager = await app.LoginAsNewMemberAsync(_anna);
+        using var bandmate = await app.LoginAsNewMemberAsync(_bram);
+
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var artist = await CreateArtistAsync(manager, $"Ruzie {attempt}");
+            var bandmateId = await AddAsManagerAsync(manager, artist, _bram);
+            var page = await bandmate.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+            var managerId = Assert.Single(page!.Managers, m => m.Name == _anna).Id;
+
+            var responses = await Task.WhenAll(
+                StopManagingAsync(manager, artist, bandmateId),
+                StopManagingAsync(bandmate, artist, managerId));
+
+            Assert.Single(responses, r => r.StatusCode == HttpStatusCode.NoContent);
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task A_Member_who_doesnt_manage_the_Artist_has_no_control_over_its_managers()
+    {
+        using var manager = await app.LoginAsNewMemberAsync(_anna);
+        using var outsider = await app.LoginAsNewMemberAsync();
+        var artist = await CreateArtistAsync(manager, "Niet Van Jou");
+        var bandmateId = await AddNewManagerAsync(manager, artist);
+        var page = await manager.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+
+        await AssertNoControlAsync(outsider, artist, bandmateId);
+
+        var after = await manager.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+        Assert.Equal(page!.Managers, after!.Managers);
+    }
+
+    [Fact]
+    public async Task The_Admin_has_no_special_control_over_managers()
+    {
+        using var manager = await app.LoginAsNewMemberAsync(_anna);
+        using var admin = await app.LoginAsAdminAsync();
+        var artist = await CreateArtistAsync(manager, "Geen Baas");
+        var bandmateId = await AddNewManagerAsync(manager, artist);
+        var page = await manager.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+
+        await AssertNoControlAsync(admin, artist, bandmateId);
+
+        var after = await manager.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+        Assert.Equal(page!.Managers, after!.Managers);
+    }
+
+    [Fact]
+    public async Task Adding_someone_who_isnt_a_Member_or_stopping_someone_who_doesnt_manage_is_not_found()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var artist = await CreateArtistAsync(manager, "Onbekend");
+
+        using var added = await AddManagerAsync(manager, artist, Guid.NewGuid());
+        using var stopped = await StopManagingAsync(manager, artist, Guid.NewGuid());
+
+        Assert.Equal(HttpStatusCode.NotFound, added.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, stopped.StatusCode);
+    }
+
+    [Fact]
+    public async Task Adding_a_Member_who_already_manages_changes_nothing()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var artist = await CreateArtistAsync(manager, "Dubbelop");
+        var bandmateId = await AddNewManagerAsync(manager, artist);
+
+        using var again = await AddManagerAsync(manager, artist, bandmateId);
+
+        Assert.Equal(HttpStatusCode.NoContent, again.StatusCode);
+        var page = await manager.GetFromJsonAsync<ManagedArtist>($"/api/my-artists/{artist.Id}/{artist.Slug}");
+        Assert.Equal(2, page!.Managers.Count);
+    }
+
+    private static async Task AssertNoControlAsync(HttpClient caller, ArtistSummary artist, Guid managerId)
+    {
+        using var candidates = await caller.GetAsync($"/api/artists/{artist.Id}/managers/candidates");
+        using var added = await AddManagerAsync(caller, artist, managerId);
+        using var stopped = await StopManagingAsync(caller, artist, managerId);
+
+        Assert.Equal(HttpStatusCode.NotFound, candidates.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, added.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, stopped.StatusCode);
+    }
+
+    private async Task<Guid> AddNewManagerAsync(HttpClient manager, ArtistSummary artist)
+    {
+        var name = $"Member {Guid.NewGuid():N}";
+        (await app.LoginAsNewMemberAsync(name)).Dispose();
+        return await AddAsManagerAsync(manager, artist, name);
+    }
+
+    // Picked by name from the list, as a manager would.
+    private static async Task<Guid> AddAsManagerAsync(HttpClient manager, ArtistSummary artist, string name)
+    {
+        var candidates = await manager.GetFromJsonAsync<List<ArtistManager>>($"/api/artists/{artist.Id}/managers/candidates");
+        var picked = candidates!.First(m => m.Name == name);
+        using var added = await AddManagerAsync(manager, artist, picked.Id);
+        Assert.Equal(HttpStatusCode.NoContent, added.StatusCode);
+        return picked.Id;
+    }
+
+    private static Task<HttpResponseMessage> StopManagingAsync(HttpClient member, ArtistSummary artist, Guid managerId) =>
+        member.DeleteAsync($"/api/artists/{artist.Id}/managers/{managerId}");
+
+    private sealed record Refusal(string Detail);
+
+    private static Task<HttpResponseMessage> AddManagerAsync(HttpClient member, ArtistSummary artist, Guid memberId) =>
+        member.PostAsJsonAsync($"/api/artists/{artist.Id}/managers", new AddManagerForm { MemberId = memberId });
 
     private static async Task<ArtistSummary> CreateArtistAsync(HttpClient member, string name)
     {
