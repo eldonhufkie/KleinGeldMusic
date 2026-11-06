@@ -234,6 +234,9 @@ namespace KleinGeld.Data.Migrations
                     b.Property<TimeSpan?>("Duration")
                         .HasColumnType("interval");
 
+                    b.Property<bool>("IsReplacingFailedAudio")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("OriginalBlobName")
                         .IsRequired()
                         .HasMaxLength(200)

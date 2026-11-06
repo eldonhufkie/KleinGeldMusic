@@ -98,13 +98,64 @@ internal static class TrackEndpoints
                     : "That file isn't audio we accept. Use FLAC, WAV, AIFF, ALAC, MP3 or AAC.";
             if (problem is not null)
             {
-                await RemoveAsync(db, links, id, trackId, caller);
+                if (track.IsReplacingFailedAudio)
+                {
+                    track.Status = TrackStatus.Failed;
+                    await db.SaveChangesAsync();
+                    await links.Blob(AudioContainer, track.OriginalBlobName).DeleteIfExistsAsync();
+                }
+                else
+                {
+                    await RemoveAsync(db, links, id, trackId, caller);
+                }
                 return Results.Problem(problem, statusCode: StatusCodes.Status422UnprocessableEntity);
             }
 
             track.Status = TrackStatus.Converting;
+            track.IsReplacingFailedAudio = false;
             await db.SaveChangesAsync();
             return Results.Ok(ToSummary(track));
+        });
+
+        // Keeps the Track and its place; the new file then goes through the same upload and confirm as a new one.
+        api.MapPost("/releases/{id:guid}/tracks/{trackId:guid}/replace", async (
+            Guid id, Guid trackId, TrackUploadForm form, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links) =>
+        {
+            Track? replaced = null;
+            List<string> oldBlobNames = [];
+            var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+            {
+                var track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
+                if (track is null)
+                {
+                    return Results.NotFound();
+                }
+                if (track.Status != TrackStatus.Failed)
+                {
+                    return Results.Problem("Only a Failed Track's audio can be replaced.", statusCode: StatusCodes.Status409Conflict);
+                }
+
+                oldBlobNames = track.BlobNames().ToList();
+                track.OriginalBlobName = $"tracks/{trackId}/{Guid.CreateVersion7()}";
+                track.ConvertedBlobName = null;
+                track.Duration = null;
+                track.Status = TrackStatus.Uploading;
+                track.IsReplacingFailedAudio = true;
+                await db.SaveChangesAsync();
+                replaced = track;
+                return null;
+            });
+            if (refused is not null)
+            {
+                return refused;
+            }
+
+            foreach (var blobName in oldBlobNames)
+            {
+                await links.Blob(AudioContainer, blobName).DeleteIfExistsAsync();
+            }
+            var link = await links.ForUploadAsync(AudioContainer, replaced!.OriginalBlobName, replaced.Id);
+            return Results.Ok(new TrackUpload(ToSummary(replaced), link.Url));
         });
 
         api.MapDelete("/releases/{id:guid}/tracks/{trackId:guid}", (
@@ -118,7 +169,7 @@ internal static class TrackEndpoints
     /// </summary>
     private static async Task<IResult> RemoveAsync(KleinGeldDbContext db, BlobLinks links, Guid id, Guid trackId, ClaimsPrincipal caller)
     {
-        string? blobName = null;
+        List<string> blobNames = [];
         var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
         {
             var track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
@@ -127,7 +178,7 @@ internal static class TrackEndpoints
                 return Results.NotFound();
             }
 
-            blobName = track.OriginalBlobName;
+            blobNames = track.BlobNames().ToList();
             db.Tracks.Remove(track);
             foreach (var later in release.Tracks.Where(t => t.Position > track.Position))
             {
@@ -141,7 +192,10 @@ internal static class TrackEndpoints
             return refused;
         }
 
-        await links.Blob(AudioContainer, blobName!).DeleteIfExistsAsync();
+        foreach (var blobName in blobNames)
+        {
+            await links.Blob(AudioContainer, blobName).DeleteIfExistsAsync();
+        }
         return Results.NoContent();
     }
 

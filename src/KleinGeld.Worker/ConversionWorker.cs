@@ -61,9 +61,18 @@ internal sealed class ConversionWorker(
         {
             var original = Path.Combine(folder.FullName, "original");
             var converted = Path.Combine(folder.FullName, "converted.m4a");
-            await audio.GetBlobClient(next.OriginalBlobName).DownloadToAsync(original, cancellation);
+            var duration = await TryDownloadAsync(audio.GetBlobClient(next.OriginalBlobName), original, cancellation)
+                ? await converter.ConvertAsync(original, converted, cancellation)
+                : null;
 
-            var duration = await converter.ConvertAsync(original, converted, cancellation);
+            var unchanged = db.Tracks.Where(t =>
+                t.Id == next.Id && t.Status == TrackStatus.Converting && t.OriginalBlobName == next.OriginalBlobName);
+            if (duration is null)
+            {
+                logger.LogWarning("Track {TrackId} could not be converted.", next.Id);
+                await unchanged.ExecuteUpdateAsync(track => track.SetProperty(t => t.Status, TrackStatus.Failed), cancellation);
+                return true;
+            }
 
             var blobName = $"tracks/{next.Id}/{Guid.CreateVersion7()}.m4a";
             var blob = audio.GetBlobClient(blobName);
@@ -73,8 +82,7 @@ internal sealed class ConversionWorker(
                 Conditions = new BlobRequestConditions { IfNoneMatch = ETag.All },
             }, cancellation);
 
-            var updated = await db.Tracks
-                .Where(t => t.Id == next.Id && t.Status == TrackStatus.Converting && t.OriginalBlobName == next.OriginalBlobName)
+            var updated = await unchanged
                 .ExecuteUpdateAsync(track => track
                     .SetProperty(t => t.Status, TrackStatus.Ready)
                     .SetProperty(t => t.ConvertedBlobName, blobName)
@@ -89,5 +97,19 @@ internal sealed class ConversionWorker(
             folder.Delete(recursive: true);
         }
         return true;
+    }
+
+    /// <summary>A missing original can never convert, so unlike an outage it must not be retried for ever.</summary>
+    private static async Task<bool> TryDownloadAsync(BlobClient blob, string path, CancellationToken cancellation)
+    {
+        try
+        {
+            await blob.DownloadToAsync(path, cancellation);
+            return true;
+        }
+        catch (RequestFailedException e) when (e.Status == 404)
+        {
+            return false;
+        }
     }
 }

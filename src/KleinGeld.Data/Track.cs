@@ -29,4 +29,11 @@ public sealed class Track
 
     /// <summary>Known once the Track is Ready.</summary>
     public TimeSpan? Duration { get; set; }
+
+    /// <summary>The upload under way replaces Failed audio, so a rejected file returns the Track to Failed.</summary>
+    public bool IsReplacingFailedAudio { get; set; }
+
+    /// <summary>Every blob holding this Track's audio.</summary>
+    public IEnumerable<string> BlobNames() =>
+        ConvertedBlobName is null ? [OriginalBlobName] : [OriginalBlobName, ConvertedBlobName];
 }
