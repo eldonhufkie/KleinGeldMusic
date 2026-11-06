@@ -21,6 +21,7 @@ else
     <h1>@_artist.Name</h1>
 
     <h2>Releases</h2>
+    <p><a href="my-artists/@_artist.Id/new-release">New Release</a></p>
     @if (_artist.Releases.Count == 0)
     {
         <p>No Releases yet.</p>
@@ -30,7 +31,10 @@ else
         <ul class="artists">
             @foreach (var release in _artist.Releases)
             {
-                <li>@release.Title</li>
+                <li>
+                    <a href="my-releases/@release.Id/@release.Slug">@release.Title</a>
+                    <span class="stage-badge">@release.Stage</span>
+                </li>
             }
         </ul>
     }

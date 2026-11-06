@@ -35,7 +35,64 @@ internal static class ReleaseEndpoints
 
             return Results.Created($"/api/releases/{release.Id}/{release.Slug}", release.ToDetails());
         });
+
+        // A wrong or old slug redirects with a 302, like an Artist's; "not found" is decided first so a redirect
+        // can't confirm that an id exists.
+        api.MapGet("/releases/{id:guid}/{slug?}", async (Guid id, string? slug, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        {
+            var release = await db.Releases
+                .Include(r => r.Artist)
+                .Where(r => r.Id == id)
+                .VisibleTo(caller)
+                .SingleOrDefaultAsync();
+
+            if (release is null)
+            {
+                return Results.NotFound();
+            }
+            return slug == release.Slug
+                ? Results.Ok(release.ToDetails())
+                : Results.Redirect($"/api/releases/{release.Id}/{release.Slug}");
+        });
+
+        api.MapPut("/releases/{id:guid}", async (Guid id, ReleaseForm form, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        {
+            var release = await db.Releases
+                .Include(r => r.Artist)
+                .Where(r => r.Id == id)
+                .ManagedBy(caller.MemberId())
+                .SingleOrDefaultAsync();
+            if (release is null)
+            {
+                return Results.NotFound();
+            }
+
+            release.Fill(form);
+            await db.SaveChangesAsync();
+
+            return Results.Ok(release.ToDetails());
+        });
+
+        api.MapDelete("/releases/{id:guid}", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        {
+            var release = await db.Releases
+                .Where(r => r.Id == id)
+                .ManagedBy(caller.MemberId())
+                .SingleOrDefaultAsync();
+            if (release is null)
+            {
+                return Results.NotFound();
+            }
+
+            db.Releases.Remove(release);
+            await db.SaveChangesAsync();
+
+            return Results.NoContent();
+        });
     }
+
+    private static IQueryable<Release> ManagedBy(this IQueryable<Release> releases, Guid memberId) =>
+        releases.Where(r => r.Artist.Managers.Any(m => m.Id == memberId));
 
     private static void Fill(this Release release, ReleaseForm form)
     {
