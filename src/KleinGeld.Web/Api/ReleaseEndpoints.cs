@@ -57,39 +57,35 @@ internal static class ReleaseEndpoints
 
         api.MapPut("/releases/{id:guid}", async (Guid id, ReleaseForm form, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers) =>
         {
-            var release = await db.Releases
-                .Include(r => r.Artist)
-                .Where(r => r.Id == id)
-                .ManagedBy(caller.MemberId())
-                .SingleOrDefaultAsync();
-            if (release is null)
+            Release? edited = null;
+            var refused = await db.WithUnsubmittedReleaseLockedAsync(id, caller, async release =>
             {
-                return Results.NotFound();
-            }
-
-            release.Fill(form);
-            await db.SaveChangesAsync();
-
-            return Results.Ok(release.ToDetails(covers));
+                release.Fill(form);
+                await db.SaveChangesAsync();
+                edited = release;
+                return null;
+            });
+            return refused ?? Results.Ok(edited!.ToDetails(covers));
         });
 
         api.MapDelete("/releases/{id:guid}", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers, BlobLinks links) =>
         {
-            var release = await db.Releases
-                .Include(r => r.Tracks)
-                .Where(r => r.Id == id)
-                .ManagedBy(caller.MemberId())
-                .SingleOrDefaultAsync();
-            if (release is null)
+            List<string> blobNames = [];
+            var refused = await db.WithUnsubmittedReleaseLockedAsync(id, caller, async release =>
             {
-                return Results.NotFound();
+                blobNames = release.Tracks.SelectMany(t => t.BlobNames()).ToList();
+                db.Releases.Remove(release);
+                await db.SaveChangesAsync();
+                return null;
+            });
+            if (refused is not null)
+            {
+                return refused;
             }
 
-            db.Releases.Remove(release);
-            await db.SaveChangesAsync();
             await covers.DeleteAllAsync(id);
 
-            foreach (var blobName in release.Tracks.SelectMany(t => t.BlobNames()))
+            foreach (var blobName in blobNames)
             {
                 await links.Blob(TrackEndpoints.AudioContainer, blobName).DeleteIfExistsAsync();
             }
