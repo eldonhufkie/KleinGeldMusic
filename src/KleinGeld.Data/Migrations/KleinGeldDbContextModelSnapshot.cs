@@ -22,6 +22,42 @@ namespace KleinGeld.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ArtistManagers", b =>
+                {
+                    b.Property<Guid>("ArtistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ManagersId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("ArtistId", "ManagersId");
+
+                    b.HasIndex("ManagersId");
+
+                    b.ToTable("ArtistManagers");
+                });
+
+            modelBuilder.Entity("KleinGeld.Data.Artist", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Artists");
+                });
+
             modelBuilder.Entity("KleinGeld.Data.JoinRequest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -283,6 +319,21 @@ namespace KleinGeld.Data.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("ArtistManagers", b =>
+                {
+                    b.HasOne("KleinGeld.Data.Artist", null)
+                        .WithMany()
+                        .HasForeignKey("ArtistId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KleinGeld.Data.Member", null)
+                        .WithMany()
+                        .HasForeignKey("ManagersId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>

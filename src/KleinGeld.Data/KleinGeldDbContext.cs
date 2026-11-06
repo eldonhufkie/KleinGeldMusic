@@ -10,6 +10,8 @@ public sealed class KleinGeldDbContext(DbContextOptions<KleinGeldDbContext> opti
 {
     public DbSet<JoinRequest> JoinRequests => Set<JoinRequest>();
 
+    public DbSet<Artist> Artists => Set<Artist>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -22,6 +24,13 @@ public sealed class KleinGeldDbContext(DbContextOptions<KleinGeldDbContext> opti
             joinRequest.Property(r => r.Message).HasMaxLength(JoinRequestForm.MessageMaxLength);
             joinRequest.Property(r => r.Status).HasConversion<string>().HasMaxLength(16);
             joinRequest.HasIndex(r => new { r.NormalizedEmail, r.Status });
+        });
+
+        builder.Entity<Artist>(artist =>
+        {
+            artist.Property(a => a.Name).HasMaxLength(ArtistForm.NameMaxLength);
+            artist.Property(a => a.Slug).HasMaxLength(ArtistForm.NameMaxLength);
+            artist.HasMany(a => a.Managers).WithMany().UsingEntity("ArtistManagers");
         });
     }
 }

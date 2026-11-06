@@ -51,6 +51,7 @@ app.MapDefaultEndpoints();
 app.MapTestingEndpoints();
 app.MapGroup("/api").MapJoinRequestEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapMemberEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapArtistEndpoints();
 var adminApi = app.MapGroup("/api/admin").RequireAuthorization(admin => admin.RequireRole(Roles.Admin));
 adminApi.MapAdminJoinRequestEndpoints();
 adminApi.MapAdminMemberEndpoints();
