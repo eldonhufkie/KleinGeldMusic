@@ -47,7 +47,7 @@ else
             <li @key="track.Id">
                 <span>@track.Position</span>
                 <button type="button" disabled="@(track.Status != TrackStatus.Ready)" aria-label="Play @track.Title"
-                        @onclick="() => Player.PlayAsync(new PlayerTrack(track.Id, track.Title))">Play</button>
+                        @onclick="() => Player.PlayAsync(new PlayerTrack(track.Id, track.Title, _release.ArtistName))">Play</button>
                 <span class="release-track-title">
                     @track.Title
                     @if (track.FeaturedArtists is not null)
