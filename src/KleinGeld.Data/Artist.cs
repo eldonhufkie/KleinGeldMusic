@@ -12,4 +12,6 @@ public sealed class Artist
 
     /// <summary>The Members who manage this Artist, all equal.</summary>
     public ICollection<Member> Managers { get; init; } = [];
+
+    public ICollection<Release> Releases { get; init; } = [];
 }

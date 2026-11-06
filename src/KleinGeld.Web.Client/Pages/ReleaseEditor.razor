@@ -1,0 +1,177 @@
+@page "/my-artists/{ArtistId:guid}/new-release"
+@page "/my-releases/{Id:guid}/{Slug?}"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+@* Starts a New Release, or edits an existing one. The API redirects an old slug; the address follows here. *@
+
+<PageTitle>@(Id is null ? "New Release" : _form.Title) · KleinGeld Music</PageTitle>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+
+@if (Id is not null && _release is null)
+{
+    <p>@(_failed ? "" : "Loading…")</p>
+}
+else
+{
+    <h1>@(_release?.Title ?? "New Release")</h1>
+    @if (_release is not null)
+    {
+        <p>
+            <a href="my-artists/@_release.ArtistId">@_release.ArtistName</a>
+            <span class="stage-badge">@_release.Stage</span>
+        </p>
+    }
+
+    <EditForm Model="_form" OnValidSubmit="SaveAsync" class="artist-form">
+        <DataAnnotationsValidator />
+
+        <label for="release-title">Title</label>
+        <InputText id="release-title" @bind-Value="_form.Title" maxlength="@ReleaseForm.TitleMaxLength" />
+        <ValidationMessage For="() => _form.Title" />
+
+        <label for="release-type">Release type</label>
+        <InputSelect id="release-type" @bind-Value="_form.Type">
+            <option value="">Choose…</option>
+            @foreach (var type in Enum.GetValues<ReleaseType>())
+            {
+                <option value="@type">@type</option>
+            }
+        </InputSelect>
+        <ValidationMessage For="() => _form.Type" />
+
+        <label for="release-date">Release date</label>
+        <InputDate id="release-date" @bind-Value="_form.ReleaseDate" />
+        <ValidationMessage For="() => _form.ReleaseDate" />
+
+        <label for="release-description">Description (optional)</label>
+        <InputTextArea id="release-description" @bind-Value="_form.Description" maxlength="@ReleaseForm.DescriptionMaxLength" rows="6" />
+        <ValidationMessage For="() => _form.Description" />
+
+        <label for="release-genre">Genre (optional)</label>
+        <InputText id="release-genre" @bind-Value="_form.Genre" maxlength="@ReleaseForm.GenreMaxLength" />
+        <ValidationMessage For="() => _form.Genre" />
+
+        <button type="submit" disabled="@_busy">@(_busy ? "Saving…" : "Save")</button>
+    </EditForm>
+
+    @if (_release is not null)
+    {
+        <h2>Delete</h2>
+        @if (_confirmingDelete)
+        {
+            <p>Delete this Release for good?</p>
+            <button type="button" disabled="@_busy" @onclick="DeleteAsync">Yes, delete it</button>
+            <button type="button" disabled="@_busy" @onclick="() => _confirmingDelete = false">Keep it</button>
+        }
+        else
+        {
+            <button type="button" @onclick="() => _confirmingDelete = true">Delete Release</button>
+        }
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid? ArtistId { get; set; }
+
+    [Parameter]
+    public Guid? Id { get; set; }
+
+    [Parameter]
+    public string? Slug { get; set; }
+
+    private readonly ReleaseForm _form = new();
+    private ReleaseDetails? _release;
+    private bool _confirmingDelete;
+    private bool _busy;
+    private bool _failed;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Id is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Show(await Http.GetFromJsonAsync<ReleaseDetails>($"api/releases/{Id}/{Slug}"));
+        }
+        catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.NotFound)
+        {
+            Navigation.NotFound();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+
+    private void Show(ReleaseDetails? release)
+    {
+        _release = release!;
+        _form.Title = _release.Title;
+        _form.Type = _release.Type;
+        _form.ReleaseDate = _release.ReleaseDate;
+        _form.Description = _release.Description;
+        _form.Genre = _release.Genre;
+        if (_release.Slug != Slug)
+        {
+            Navigation.NavigateTo($"my-releases/{_release.Id}/{_release.Slug}", replace: true);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _failed = false;
+        try
+        {
+            using var response = Id is null
+                ? await Http.PostAsJsonAsync($"api/artists/{ArtistId}/releases", _form)
+                : await Http.PutAsJsonAsync($"api/releases/{Id}", _form);
+            _failed = !response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+            {
+                Show(await response.Content.ReadFromJsonAsync<ReleaseDetails>());
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        _busy = true;
+        _failed = false;
+        try
+        {
+            using var response = await Http.DeleteAsync($"api/releases/{Id}");
+            _failed = !response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+            {
+                Navigation.NavigateTo($"my-artists/{_release!.ArtistId}");
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
