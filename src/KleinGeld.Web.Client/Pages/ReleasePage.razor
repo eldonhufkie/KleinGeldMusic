@@ -108,7 +108,7 @@ else
         Player.PlayAsync(_tracks.Select(ToPlayerTrack).ToList(), _tracks.IndexOf(track));
 
     private PlayerTrack ToPlayerTrack(TrackSummary track) =>
-        new(track.Id, track.Title, _release!.ArtistName, track.Status == TrackStatus.Ready);
+        PlayerTrack.From(track, _release!.ArtistName);
 
     private async Task ApproveAsync()
     {
