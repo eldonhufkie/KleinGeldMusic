@@ -1,3 +1,4 @@
+using KleinGeld.Data;
 using MimeKit;
 
 namespace KleinGeld.Web.Email;
@@ -32,6 +33,19 @@ internal static class MemberEmails
             "KleinGeld Music",
         ]));
 
+    /// <summary>Email 8: the Admin Rejected a Release, with the reason.</summary>
+    public static OutgoingEmail ReleaseRejected(MailboxAddress manager, Release release) =>
+        new(manager, $"{release.Title} was rejected", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin rejected \"{release.Title}\" by {release.Artist.Name}:",
+            "",
+            release.RejectionReason!,
+            "",
+            "You can edit it under My Artists and submit it again.",
+        ]));
+
     /// <summary>Email 3: Forgot password, with the link to choose a new one.</summary>
     public static OutgoingEmail PasswordReset(MailboxAddress member, Uri setPasswordLink) =>
         new(member, "Reset your KleinGeld Music password", string.Join(Environment.NewLine,
@@ -44,5 +58,28 @@ internal static class MemberEmails
             setPasswordLink.ToString(),
             "",
             "The link works for 15 minutes. If you didn't ask for this, you can ignore this email.",
+        ]));
+
+    /// <summary>Email 4: sent to the new address, with the link that makes it the Member's login email.</summary>
+    public static OutgoingEmail ConfirmNewEmail(MailboxAddress newAddress, Uri confirmLink) =>
+        new(newAddress, "Confirm your new KleinGeld Music email", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            "Someone asked to use this email address to log in to KleinGeld Music.",
+            "Confirm it here, and it replaces the old one:",
+            "",
+            confirmLink.ToString(),
+            "",
+            "The link works for 15 minutes. If you didn't ask for this, you can ignore this email.",
+        ]));
+
+    /// <summary>Email 7: the Admin approved a Release of an Artist the Member manages.</summary>
+    public static OutgoingEmail ReleaseApproved(MailboxAddress manager, Release release) =>
+        new(manager, $"{release.Title} is Published", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin approved \"{release.Title}\" by {release.Artist.Name}. It's Published: every Member can now listen to it.",
         ]));
 }

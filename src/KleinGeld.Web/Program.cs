@@ -2,6 +2,7 @@ using KleinGeld.Contracts;
 using KleinGeld.Data;
 using KleinGeld.Web;
 using KleinGeld.Web.Api;
+using KleinGeld.Web.Blobs;
 using KleinGeld.Web.Components;
 using KleinGeld.Web.Email;
 using KleinGeld.Web.Testing;
@@ -14,11 +15,24 @@ builder.AddClock();
 builder.AddNpgsqlDbContext<KleinGeldDbContext>("kleingeld", settings => settings.DisableRetry = false);
 builder.AddAzureBlobServiceClient("blobs");
 builder.Services.AddHostedService<BlobCorsSetup>();
+builder.Services.AddSingleton<BlobLinks>();
+builder.Services.AddSingleton<PlayLinks>();
+builder.Services.AddSingleton<CoverStore>();
+builder.Services.AddSingleton<AudioProbe>();
+builder.Services.AddSingleton<TagReader>();
+builder.Services.AddSingleton<UploadCleanUp>();
+builder.Services.AddHostedService<DailyUploadCleanUp>();
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseMigratedHealthCheck>("database-migrated");
 
 builder.AddMemberAuthentication();
 builder.AddEmailSender();
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IManagedArtistsState, ServerManagedArtistsState>();
+builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IReviewCountState, ServerReviewCountState>();
+builder.Services.AddScoped<KleinGeld.Web.Client.Player.IPlayLinkSource, ServerPlayLinkSource>();
+KleinGeld.Web.Client.Player.PlayerRegistration.AddPlayer(builder.Services);
 
 builder.Services.AddProblemDetails();
 // Checks API request bodies against their DataAnnotations and answers 400 with the errors.
@@ -51,9 +65,16 @@ app.MapDefaultEndpoints();
 app.MapTestingEndpoints();
 app.MapGroup("/api").MapJoinRequestEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapMemberEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapArtistEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapReleaseEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapReleaseListEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapTrackEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapCoverEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapSubmissionEndpoints();
 var adminApi = app.MapGroup("/api/admin").RequireAuthorization(admin => admin.RequireRole(Roles.Admin));
 adminApi.MapAdminJoinRequestEndpoints();
 adminApi.MapAdminMemberEndpoints();
+adminApi.MapAdminReviewEndpoints();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

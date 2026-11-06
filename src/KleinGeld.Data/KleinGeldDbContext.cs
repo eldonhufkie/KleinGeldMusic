@@ -10,6 +10,14 @@ public sealed class KleinGeldDbContext(DbContextOptions<KleinGeldDbContext> opti
 {
     public DbSet<JoinRequest> JoinRequests => Set<JoinRequest>();
 
+    public DbSet<Artist> Artists => Set<Artist>();
+
+    public DbSet<Release> Releases => Set<Release>();
+
+    public DbSet<Track> Tracks => Set<Track>();
+
+    public DbSet<RightsDeclaration> RightsDeclarations => Set<RightsDeclaration>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -22,6 +30,41 @@ public sealed class KleinGeldDbContext(DbContextOptions<KleinGeldDbContext> opti
             joinRequest.Property(r => r.Message).HasMaxLength(JoinRequestForm.MessageMaxLength);
             joinRequest.Property(r => r.Status).HasConversion<string>().HasMaxLength(16);
             joinRequest.HasIndex(r => new { r.NormalizedEmail, r.Status });
+        });
+
+        builder.Entity<Artist>(artist =>
+        {
+            artist.Property(a => a.Name).HasMaxLength(ArtistForm.NameMaxLength);
+            artist.Property(a => a.Slug).HasMaxLength(ArtistForm.NameMaxLength);
+            artist.HasMany(a => a.Managers).WithMany().UsingEntity("ArtistManagers");
+        });
+
+        builder.Entity<Release>(release =>
+        {
+            release.Property(r => r.Title).HasMaxLength(ReleaseForm.TitleMaxLength);
+            release.Property(r => r.Slug).HasMaxLength(ReleaseForm.TitleMaxLength);
+            release.Property(r => r.Type).HasConversion<string>().HasMaxLength(16);
+            release.Property(r => r.Description).HasMaxLength(ReleaseForm.DescriptionMaxLength);
+            release.Property(r => r.Genre).HasMaxLength(ReleaseForm.GenreMaxLength);
+            release.Property(r => r.Stage).HasConversion<string>().HasMaxLength(16);
+            release.Property(r => r.RejectionReason).HasMaxLength(RejectForm.ReasonMaxLength);
+            release.HasOne(r => r.Artist).WithMany(a => a.Releases).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<RightsDeclaration>(declaration =>
+        {
+            declaration.HasOne<Release>().WithMany(r => r.RightsDeclarations).HasForeignKey(d => d.ReleaseId).OnDelete(DeleteBehavior.Cascade);
+            declaration.HasOne<Member>().WithMany().HasForeignKey(d => d.MemberId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<Track>(track =>
+        {
+            track.Property(t => t.Title).HasMaxLength(ReleaseForm.TitleMaxLength);
+            track.Property(t => t.FeaturedArtists).HasMaxLength(TrackForm.FeaturedArtistsMaxLength);
+            track.Property(t => t.Status).HasConversion<string>().HasMaxLength(16);
+            track.Property(t => t.OriginalBlobName).HasMaxLength(200);
+            track.Property(t => t.ConvertedBlobName).HasMaxLength(200);
+            track.HasOne(t => t.Release).WithMany(r => r.Tracks).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

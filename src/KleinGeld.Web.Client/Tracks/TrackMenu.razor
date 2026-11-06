@@ -1,0 +1,34 @@
+@inject PlayerService Player
+
+@* The menu of a Track row. It keeps its clicks to itself, because a click on the row plays the Track. *@
+
+<span class="track-menu" @onclick:stopPropagation="true">
+    <button type="button" aria-label="More for @Track.Title" aria-expanded="@(_open ? "true" : "false")"
+            @onclick="() => _open = !_open">⋯</button>
+    @if (_open)
+    {
+        <span class="track-menu-items">
+            <button type="button" @onclick="PlayNextAsync">Play next</button>
+            <button type="button" @onclick="AddToQueueAsync">Add to queue</button>
+        </span>
+    }
+</span>
+
+@code {
+    private bool _open;
+
+    [Parameter, EditorRequired]
+    public PlayerTrack Track { get; set; } = null!;
+
+    private async Task PlayNextAsync()
+    {
+        _open = false;
+        await Player.PlayNextAsync(Track);
+    }
+
+    private async Task AddToQueueAsync()
+    {
+        _open = false;
+        await Player.AddToQueueAsync(Track);
+    }
+}

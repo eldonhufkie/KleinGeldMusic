@@ -130,6 +130,9 @@ else
             return;
         }
 
+        // Sessions are checked against the security stamp on every request, in case this changed it.
+        await SignInManager.RefreshSignInAsync(user);
+
         // Immediately prompt the user to enter a name for the credential
         var credentialIdBase64Url = Base64Url.EncodeToString(attestationResult.Passkey.CredentialId);
         RedirectManager.RedirectTo($"Account/Manage/RenamePasskey/{credentialIdBase64Url}");
@@ -177,6 +180,8 @@ else
             return;
         }
 
+        // Sessions are checked against the security stamp on every request, in case this changed it.
+        await SignInManager.RefreshSignInAsync(user);
         RedirectManager.RedirectToCurrentPageWithStatus("Passkey deleted successfully.", HttpContext);
     }
 }

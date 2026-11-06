@@ -1,10 +1,12 @@
-﻿@page "/"
+@page "/"
 
 <PageTitle>KleinGeld Music</PageTitle>
 
 <AuthorizeView>
     <Authorized>
         <h1>Home</h1>
+        <NewReleases />
+        <p>Making music? <a href="my-artists">Create an Artist</a></p>
     </Authorized>
     <NotAuthorized>
         <main class="landing">

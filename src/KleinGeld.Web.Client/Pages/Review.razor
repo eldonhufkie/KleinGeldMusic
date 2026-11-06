@@ -1,0 +1,111 @@
+@page "/admin/review"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inject HttpClient Http
+@inject IReviewCountState ReviewCount
+
+@* The Submitted Releases, oldest first, so the Admin works through them fairly. *@
+
+<PageTitle>Review · KleinGeld Music</PageTitle>
+
+<h1>Review</h1>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+
+@if (_releases is null)
+{
+    <p>@(_failed ? "" : "Loading…")</p>
+}
+else if (_releases.Count == 0)
+{
+    <p>Nothing is waiting for review.</p>
+}
+else
+{
+    <ul class="join-requests">
+        @foreach (var release in _releases)
+        {
+            <li class="join-request">
+                <p><a href="releases/@release.Id/@release.Slug"><strong>@release.Title</strong></a> by @release.ArtistName <span class="stage-badge">@release.Type</span></p>
+                <p>
+                    Submitted @release.SubmittedAt.ToString("d MMMM yyyy, HH:mm")
+                    by @(release.RightsDeclarations[0].MemberName ?? "a former Member"),
+                    with Rights Declaration version @release.RightsDeclarations[0].WordingVersion
+                </p>
+                @if (_rejecting == release.Id)
+                {
+                    <label for="reject-reason">Why is it rejected? The Artist's managers will read this.</label>
+                    <textarea id="reject-reason" rows="4" maxlength="@RejectForm.ReasonMaxLength" @bind="_reason" @bind:event="oninput"></textarea>
+                    <div class="join-request-actions">
+                        <button type="button" disabled="@(_busy || string.IsNullOrWhiteSpace(_reason))" @onclick="() => RejectAsync(release)">
+                            @(_busy ? "Rejecting…" : "Reject")
+                        </button>
+                        <button type="button" disabled="@_busy" @onclick="() => _rejecting = null">Cancel</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="join-request-actions">
+                        <button type="button" disabled="@_busy" @onclick="() => StartRejecting(release)">Reject</button>
+                    </div>
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private List<ReviewRelease>? _releases;
+    private bool _failed;
+
+    /// <summary>The Release whose reason is being typed.</summary>
+    private Guid? _rejecting;
+    private string _reason = "";
+    private bool _busy;
+
+    private void StartRejecting(ReviewRelease release)
+    {
+        _rejecting = release.Id;
+        _reason = "";
+    }
+
+    private async Task RejectAsync(ReviewRelease release)
+    {
+        _busy = true;
+        _failed = false;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync($"api/admin/review/releases/{release.Id}/reject", new RejectForm { Reason = _reason });
+            _failed = !response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+            {
+                _releases!.Remove(release);
+                _rejecting = null;
+                await ReviewCount.LoadAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _releases = await Http.GetFromJsonAsync<List<ReviewRelease>>("api/admin/review");
+            await ReviewCount.LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+}

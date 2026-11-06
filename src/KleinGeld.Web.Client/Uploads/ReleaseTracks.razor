@@ -1,0 +1,387 @@
+@using KleinGeld.Web.Client.Tracks
+@implements IDisposable
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+@*
+    The Track list of a Draft: adds audio files, straight to blob storage, with each upload's progress; follows their
+    conversion; edits each Track's details; reorders Tracks by dragging; and removes or replaces a Failed Track's audio.
+*@
+
+<h2>Tracks</h2>
+
+@foreach (var message in _messages)
+{
+    <p role="alert">@message</p>
+}
+
+@* Always rendered: the drag module attaches to this element once. *@
+<div @ref="_list">
+    @if (_tracks.Count > 0)
+    {
+        <ol>
+            @foreach (var track in _tracks)
+            {
+                <li @key="track.Id" data-track-id="@track.Id">
+                    <button type="button" class="track-handle" disabled="@_busy" aria-label="Move @track.Title, or use the arrow keys">⠿</button>
+                    @track.Title
+                    @if (track.FeaturedArtists is not null)
+                    {
+                        <span>feat. @track.FeaturedArtists</span>
+                    }
+                    <TrackBadges Track="track" />
+                    <span class="stage-badge">@track.Status</span>
+                    @track.Duration?.ToString(@"m\:ss")
+                    @if (_progress.TryGetValue(track.Id, out var percent))
+                    {
+                        <progress max="100" value="@percent" aria-label="Upload of @track.Title">@percent%</progress>
+                    }
+                    @if (track.Status == TrackStatus.Failed)
+                    {
+                        <button type="button" disabled="@_busy" @onclick="() => _replacing = track">Replace audio</button>
+                    }
+                    <button type="button" disabled="@_busy" @onclick="() => StartEditing(track)">Edit</button>
+                    <button type="button" disabled="@_busy" @onclick="() => RemoveAsync(track)">Remove</button>
+
+                    @if (_editing == track.Id)
+                    {
+                        <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                            <DataAnnotationsValidator />
+
+                            <label for="track-title">Title</label>
+                            <InputText id="track-title" @bind-Value="_form.Title" maxlength="@ReleaseForm.TitleMaxLength" />
+                            <ValidationMessage For="() => _form.Title" />
+
+                            <label for="track-featured">Featured Artists (optional)</label>
+                            <InputText id="track-featured" @bind-Value="_form.FeaturedArtists" maxlength="@TrackForm.FeaturedArtistsMaxLength" />
+                            <ValidationMessage For="() => _form.FeaturedArtists" />
+
+                            <label><InputCheckbox @bind-Value="_form.SingleMark" /> Also out as a Single</label>
+                            <label><InputCheckbox @bind-Value="_form.Explicit" /> Explicit</label>
+
+                            <button type="submit" disabled="@_busy">Save</button>
+                            <button type="button" disabled="@_busy" @onclick="() => _editing = null">Cancel</button>
+                        </EditForm>
+                    }
+                </li>
+            }
+        </ol>
+    }
+</div>
+
+@if (_replacing is not null)
+{
+    <label for="replacement-file">New audio for @_replacing.Title</label>
+    <input id="replacement-file" type="file" accept="audio/*,.flac,.aiff,.aif,.m4a" disabled="@_busy" @ref="_replacementInput" @onchange="ReplaceChosenAsync" />
+}
+
+<label for="track-files">Add audio files</label>
+<input id="track-files" type="file" multiple accept="audio/*,.flac,.aiff,.aif,.m4a" disabled="@_busy" @ref="_input" @onchange="UploadChosenAsync" />
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid ReleaseId { get; set; }
+
+    /// <summary>A file was accepted, so its tags may have filled details of the Release.</summary>
+    [Parameter]
+    public EventCallback OnConfirmed { get; set; }
+
+    /// <summary>The Tracks or their statuses changed, which decides whether the Release can be Submitted.</summary>
+    [Parameter]
+    public EventCallback<IReadOnlyCollection<TrackStatus>> OnStatusesChanged { get; set; }
+
+    private sealed record Problem(string? Detail);
+
+    private readonly Dictionary<Guid, int> _progress = [];
+    private readonly List<string> _messages = [];
+    private List<TrackSummary> _tracks = [];
+    private List<TrackStatus> _reportedStatuses = [];
+    private ElementReference _input;
+    private readonly CancellationTokenSource _closing = new();
+    private ElementReference _replacementInput;
+    private TrackSummary? _replacing;
+    private ElementReference _list;
+    private DotNetObjectReference<ReleaseTracks>? _self;
+    private TrackForm _form = new();
+    private Guid? _editing;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    protected override void OnInitialized() => _ = FollowConversionAsync();
+
+    /// <summary>The worker changes Tracks behind this page's back, so it looks again while any is Converting.</summary>
+    private async Task FollowConversionAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_closing.Token))
+            {
+                if (!_busy && _tracks.Any(t => t.Status == TrackStatus.Converting))
+                {
+                    await LoadAsync();
+                    StateHasChanged();
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The Member left the page.
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Only on a real change: telling the editor renders it, which renders this list again.
+        var statuses = _tracks.Select(t => t.Status).ToList();
+        if (!statuses.SequenceEqual(_reportedStatuses))
+        {
+            _reportedStatuses = statuses;
+            await OnStatusesChanged.InvokeAsync(statuses);
+        }
+
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "/track-reorder.js");
+            await module.InvokeVoidAsync("attach", _list, _self);
+        }
+    }
+
+    public void Dispose()
+    {
+        _closing.Cancel();
+        _closing.Dispose();
+        _self?.Dispose();
+    }
+
+    private void StartEditing(TrackSummary track)
+    {
+        _form = new TrackForm
+        {
+            Title = track.Title,
+            SingleMark = track.SingleMark,
+            FeaturedArtists = track.FeaturedArtists,
+            Explicit = track.Explicit,
+        };
+        _editing = track.Id;
+    }
+
+    private Task SaveAsync() => ChangeAsync(
+        () => Http.PutAsJsonAsync($"api/releases/{ReleaseId}/tracks/{_editing}", _form),
+        () => _editing = null);
+
+    [JSInvokable]
+    public async Task Reorder(List<Guid> trackIds)
+    {
+        await ChangeAsync(
+            () => Http.PutAsJsonAsync($"api/releases/{ReleaseId}/tracks/order", new TrackOrderForm { TrackIds = trackIds }),
+            () => { });
+        StateHasChanged();
+    }
+
+    /// <summary>Sends a change to the Track list, then shows the list as the server has it, whatever the outcome.</summary>
+    private async Task ChangeAsync(Func<Task<HttpResponseMessage>> send, Action onSuccess)
+    {
+        _busy = true;
+        _messages.Clear();
+        try
+        {
+            using var response = await send();
+            if (response.IsSuccessStatusCode)
+            {
+                onSuccess();
+            }
+            else
+            {
+                var problem = response.StatusCode == HttpStatusCode.Conflict
+                    ? await response.Content.ReadFromJsonAsync<Problem>()
+                    : null;
+                _messages.Add(problem?.Detail ?? "That couldn't be saved. Reload the page and try again.");
+            }
+            await LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _messages.Add("Something went wrong. Reload the page and try again.");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ReplaceChosenAsync()
+    {
+        var track = _replacing!;
+        _busy = true;
+        _messages.Clear();
+        try
+        {
+            var file = (await BlobUpload.ChosenFilesAsync(JS, _replacementInput))[0];
+            using var requested = await Http.PostAsJsonAsync(
+                $"api/releases/{ReleaseId}/tracks/{track.Id}/replace", new TrackUploadForm { FileName = file.Name, Size = file.Size });
+            if (!requested.IsSuccessStatusCode)
+            {
+                await ReportAsync(file, requested);
+                return;
+            }
+
+            var upload = (await requested.Content.ReadFromJsonAsync<TrackUpload>())!;
+            _progress[track.Id] = 0;
+            var uploaded = await BlobUpload.SendAsync(JS, _replacementInput, upload.UploadLink, percent =>
+            {
+                _progress[track.Id] = percent;
+                StateHasChanged();
+            }, 0);
+            _progress.Remove(track.Id);
+
+            if (uploaded)
+            {
+                using var confirmed = await Http.PostAsync($"api/releases/{ReleaseId}/tracks/{track.Id}/confirm", null);
+                if (!confirmed.IsSuccessStatusCode)
+                {
+                    await ReportAsync(file, confirmed);
+                }
+                else
+                {
+                    await ReportConfirmedAsync(file, confirmed);
+                }
+            }
+            else
+            {
+                _messages.Add($"{file.Name}: the upload failed. Remove the Track and add the file again.");
+            }
+            _replacing = null;
+            await LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _messages.Add("Something went wrong. Reload the page and try again.");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _tracks = await Http.GetFromJsonAsync<List<TrackSummary>>($"api/tracks?releaseId={ReleaseId}") ?? [];
+        }
+        catch (HttpRequestException)
+        {
+            const string message = "The Tracks couldn't be loaded. Reload the page and try again.";
+            if (!_messages.Contains(message))
+            {
+                _messages.Add(message);
+            }
+        }
+    }
+
+    private async Task UploadChosenAsync()
+    {
+        _busy = true;
+        _messages.Clear();
+        try
+        {
+            var files = await BlobUpload.ChosenFilesAsync(JS, _input);
+            for (var index = 0; index < files.Count; index++)
+            {
+                await UploadAsync(index, files[index]);
+            }
+            await BlobUpload.ClearAsync(JS, _input);
+        }
+        catch (HttpRequestException)
+        {
+            _messages.Add("Something went wrong. Reload the page and try again.");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task UploadAsync(int index, BlobUpload.ChosenFile file)
+    {
+        using var requested = await Http.PostAsJsonAsync(
+            $"api/releases/{ReleaseId}/tracks", new TrackUploadForm { FileName = file.Name, Size = file.Size });
+        if (!requested.IsSuccessStatusCode)
+        {
+            await ReportAsync(file, requested);
+            return;
+        }
+
+        var upload = (await requested.Content.ReadFromJsonAsync<TrackUpload>())!;
+        _tracks.Add(upload.Track);
+        _progress[upload.Track.Id] = 0;
+        StateHasChanged();
+
+        var uploaded = await BlobUpload.SendAsync(JS, _input, upload.UploadLink, percent =>
+        {
+            _progress[upload.Track.Id] = percent;
+            StateHasChanged();
+        }, index);
+        _progress.Remove(upload.Track.Id);
+
+        if (uploaded)
+        {
+            using var confirmed = await Http.PostAsync($"api/releases/{ReleaseId}/tracks/{upload.Track.Id}/confirm", null);
+            if (!confirmed.IsSuccessStatusCode)
+            {
+                await ReportAsync(file, confirmed);
+            }
+            else
+            {
+                await ReportConfirmedAsync(file, confirmed);
+            }
+        }
+        else
+        {
+            _messages.Add($"{file.Name}: the upload failed. Try adding it again.");
+            using var _ = await Http.DeleteAsync($"api/releases/{ReleaseId}/tracks/{upload.Track.Id}");
+        }
+        await LoadAsync();
+    }
+
+    private async Task ReportConfirmedAsync(BlobUpload.ChosenFile file, HttpResponseMessage confirmed)
+    {
+        var confirmation = await confirmed.Content.ReadFromJsonAsync<TrackConfirmation>();
+        if (confirmation?.Note is { } note)
+        {
+            _messages.Add($"{file.Name}: {note}");
+        }
+        await OnConfirmed.InvokeAsync();
+    }
+
+    private async Task ReportAsync(BlobUpload.ChosenFile file, HttpResponseMessage response)
+    {
+        var problem = response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.UnprocessableEntity
+            ? await response.Content.ReadFromJsonAsync<Problem>()
+            : null;
+        _messages.Add($"{file.Name}: {problem?.Detail ?? "it couldn't be added. A file can be at most 500 MB."}");
+    }
+
+    private async Task RemoveAsync(TrackSummary track)
+    {
+        _busy = true;
+        _messages.Clear();
+        try
+        {
+            using var _ = await Http.DeleteAsync($"api/releases/{ReleaseId}/tracks/{track.Id}");
+            await LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _messages.Add("Something went wrong. Reload the page and try again.");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

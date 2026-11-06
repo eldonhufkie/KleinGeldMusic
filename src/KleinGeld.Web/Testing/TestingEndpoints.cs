@@ -1,6 +1,9 @@
+using KleinGeld.Contracts;
 using KleinGeld.Data;
+using KleinGeld.Web.Blobs;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace KleinGeld.Web.Testing;
 
@@ -32,7 +35,56 @@ internal static class TestingEndpoints
             return Results.NoContent();
         });
 
-        testing.MapPost("/security-stamp", async (UserManager<Member> members, [FromBody] string email) =>
+        testing.MapPost("/upload-clean-up", async (UploadCleanUp cleanUp) =>
+        {
+            await cleanUp.RunAsync();
+            return Results.NoContent();
+        });
+
+        // Going through approval takes seconds per Release, too slow for a list longer than one load.
+        testing.MapPost("/published-artists", async (KleinGeldDbContext db, [FromBody] string[] names) =>
+        {
+            var manager = await db.Users.FirstAsync();
+            foreach (var name in names)
+            {
+                var artist = new Artist { Name = name, Slug = Slugs.From(name), Managers = [manager] };
+                artist.Releases.Add(new Release
+                {
+                    Title = name,
+                    Slug = Slugs.From(name),
+                    Type = ReleaseType.Single,
+                    ReleaseDate = new DateOnly(2026, 1, 1),
+                    PublishedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                    Stage = ReleaseStage.Published,
+                });
+                db.Artists.Add(artist);
+            }
+
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
+        // A list needs more Releases than going through upload, conversion and approval for each would allow.
+        testing.MapPost("/published-releases", async (KleinGeldDbContext db, [FromBody] SeededReleases seeded) =>
+        {
+            db.Releases.AddRange(seeded.Releases.Select(r => new Release
+            {
+                ArtistId = seeded.ArtistId,
+                Title = r.Title,
+                Slug = Slugs.From(r.Title),
+                Type = seeded.Type,
+                ReleaseDate = r.ReleaseDate,
+                Stage = ReleaseStage.Published,
+                PublishedAt = r.PublishedAt,
+            }));
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
+        testing.MapGet("/releases/{id:guid}/rejection-reason", async (Guid id, KleinGeldDbContext db) =>
+            Results.Json(await db.Releases.Where(r => r.Id == id).Select(r => r.RejectionReason).SingleAsync()));
+
+        testing.MapPost("/security-stamp",async (UserManager<Member> members, [FromBody] string email) =>
         {
             var member = await members.FindByEmailAsync(email);
             if (member is null)
@@ -44,4 +96,8 @@ internal static class TestingEndpoints
             return Results.NoContent();
         });
     }
+
+    private sealed record SeededRelease(string Title, DateTimeOffset PublishedAt, DateOnly? ReleaseDate);
+
+    private sealed record SeededReleases(Guid ArtistId, ReleaseType Type, List<SeededRelease> Releases);
 }

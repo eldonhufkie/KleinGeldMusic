@@ -1,0 +1,115 @@
+@implements IDisposable
+@inject PlayerService Player
+@inject JsAudioElement Audio
+
+@*
+    The one audio element and its controls. MainLayout keeps this outside @Body and outside AuthorizeView, which can
+    drop its content while it re-checks: either way the element would go, and the music with it.
+*@
+
+<audio @ref="_element" preload="metadata"></audio>
+
+@if (Player.Current is not null || Player.Notice is not null)
+{
+    @* On a phone (app.css) this is the mini player until the Member opens it; the wider layout never needs to. *@
+    <section class="player-bar @(Player.IsFullPlayerOpen ? "player-full" : null)" aria-label="Player">
+        @if (Player.Notice is not null)
+        {
+            <p role="alert" class="player-notice">@Player.Notice</p>
+        }
+        @if (Player.Current is not null)
+        {
+            <button type="button" class="player-close" @onclick="Player.CloseFullPlayer">Close</button>
+            <button type="button" class="player-step" @onclick="Player.PreviousAsync">Previous</button>
+            <button type="button" @onclick="ToggleAsync">@(Player.IsPlaying ? "Pause" : "Play")</button>
+            <button type="button" class="player-step" @onclick="Player.NextAsync">Next</button>
+            <span class="player-title">@Player.Current.Title</span>
+            <button type="button" class="player-open" aria-label="Open the full player"
+                    @onclick="Player.OpenFullPlayer">@Player.Current.Title</button>
+            <span class="player-time">@Format(_seekingTo ?? Player.Position)</span>
+            <input type="range" class="player-seek" aria-label="Seek" min="0" step="1"
+                   max="@((int)Player.Duration.TotalSeconds)"
+                   value="@((int)(_seekingTo ?? Player.Position).TotalSeconds)"
+                   @oninput="ShowSeeking" @onchange="SeekAsync" />
+            <span class="player-time">@Format(Player.Duration)</span>
+            <button type="button" class="player-step" aria-pressed="@(Player.IsMuted ? "true" : "false")"
+                    @onclick="Player.ToggleMuteAsync">Mute</button>
+            <input type="range" class="player-volume" aria-label="Volume" min="0" max="100" step="1"
+                   value="@((int)Math.Round(Player.Volume * 100))" @oninput="SetVolumeAsync" />
+            <button type="button" class="player-step" aria-pressed="@(Player.Shuffle ? "true" : "false")"
+                    @onclick="() => Player.SetShuffle(!Player.Shuffle)">Shuffle</button>
+            <button type="button" class="player-step" @onclick="NextRepeat">Repeat: @Player.Repeat.ToString().ToLowerInvariant()</button>
+            <button type="button" class="player-step" aria-expanded="@(_queueOpen ? "true" : "false")"
+                    @onclick="() => _queueOpen = !_queueOpen">Queue</button>
+            @if (_queueOpen)
+            {
+                @* By index, not by id: the same Track can be in the Queue twice. *@
+                var queue = Player.Queue;
+                <ol class="queue-panel" aria-label="Queue">
+                    @for (var i = 0; i < queue.Count; i++)
+                    {
+                        var index = i;
+                        var track = queue[index];
+                        <li aria-current="@(index == Player.CurrentIndex ? "true" : null)">
+                            <span class="queue-track">@track.Title · @track.Artist</span>
+                            @if (index != Player.CurrentIndex)
+                            {
+                                <button type="button" aria-label="Remove @track.Title from the Queue"
+                                        @onclick="() => Player.RemoveFromQueue(index)">Remove</button>
+                            }
+                        </li>
+                    }
+                </ol>
+            }
+        }
+    </section>
+}
+
+@code {
+    private ElementReference _element;
+
+    // While the handle is dragged it follows the Member, not the audio.
+    private TimeSpan? _seekingTo;
+
+    private bool _queueOpen;
+
+    protected override void OnInitialized() => Player.Changed += Refresh;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Audio.AttachAsync(_element);
+            await Player.RestoreAsync();
+        }
+    }
+
+    public void Dispose() => Player.Changed -= Refresh;
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private Task ToggleAsync() => Player.IsPlaying ? Player.PauseAsync() : Player.ResumeAsync();
+
+    private void NextRepeat() => Player.SetRepeat(Player.Repeat switch
+    {
+        RepeatMode.Off => RepeatMode.All,
+        RepeatMode.All => RepeatMode.One,
+        _ => RepeatMode.Off,
+    });
+
+    private void ShowSeeking(ChangeEventArgs e) => _seekingTo = Seconds(e);
+
+    private async Task SeekAsync(ChangeEventArgs e)
+    {
+        await Player.SeekAsync(Seconds(e));
+        _seekingTo = null;
+    }
+
+    private Task SetVolumeAsync(ChangeEventArgs e) =>
+        Player.SetVolumeAsync(double.Parse(e.Value!.ToString()!, System.Globalization.CultureInfo.InvariantCulture) / 100);
+
+    private static TimeSpan Seconds(ChangeEventArgs e) =>
+        TimeSpan.FromSeconds(double.Parse(e.Value!.ToString()!, System.Globalization.CultureInfo.InvariantCulture));
+
+    private static string Format(TimeSpan time) => time.ToString(time.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
+}
