@@ -34,6 +34,21 @@ public sealed class PlayerService
     /// <summary>A short message for the Member about what just went wrong, if anything did.</summary>
     public string? Notice { get; private set; }
 
+    /// <summary>Whether a phone shows the full player over the page rather than the mini player.</summary>
+    public bool IsFullPlayerOpen { get; private set; }
+
+    public void OpenFullPlayer()
+    {
+        IsFullPlayerOpen = true;
+        Changed?.Invoke();
+    }
+
+    public void CloseFullPlayer()
+    {
+        IsFullPlayerOpen = false;
+        Changed?.Invoke();
+    }
+
     public async Task PlayAsync(PlayerTrack track)
     {
         var link = await _links.ForTrackAsync(track.Id);

@@ -11,21 +11,25 @@
 
 @if (Player.Current is not null || Player.Notice is not null)
 {
-    <section class="player-bar" aria-label="Player">
+    @* On a phone (app.css) this is the mini player until the Member opens it; the wider layout never needs to. *@
+    <section class="player-bar @(Player.IsFullPlayerOpen ? "player-full" : null)" aria-label="Player">
         @if (Player.Notice is not null)
         {
             <p role="alert" class="player-notice">@Player.Notice</p>
         }
         @if (Player.Current is not null)
         {
+            <button type="button" class="player-close" @onclick="Player.CloseFullPlayer">Close</button>
             <button type="button" @onclick="ToggleAsync">@(Player.IsPlaying ? "Pause" : "Play")</button>
             <span class="player-title">@Player.Current.Title</span>
-            <span>@Format(_seekingTo ?? Player.Position)</span>
+            <button type="button" class="player-open" aria-label="Open the full player"
+                    @onclick="Player.OpenFullPlayer">@Player.Current.Title</button>
+            <span class="player-time">@Format(_seekingTo ?? Player.Position)</span>
             <input type="range" class="player-seek" aria-label="Seek" min="0" step="1"
                    max="@((int)Player.Duration.TotalSeconds)"
                    value="@((int)(_seekingTo ?? Player.Position).TotalSeconds)"
                    @oninput="ShowSeeking" @onchange="SeekAsync" />
-            <span>@Format(Player.Duration)</span>
+            <span class="player-time">@Format(Player.Duration)</span>
         }
     </section>
 }
