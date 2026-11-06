@@ -192,6 +192,24 @@ public sealed class TrackTests(KleinGeldApp app)
         Assert.Equal([upload.Track], await ListTracksAsync(admin, release));
     }
 
+    [Theory]
+    [InlineData("tagged.mp3")]
+    [InlineData("tagged.flac")]
+    [InlineData("tagged.m4a")]
+    public async Task A_Track_takes_its_title_from_the_tag_of_its_file(string fixture)
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+        var file = await ReadFixtureAsync(fixture);
+        var upload = await RequestUploadAsync(manager, release, "01 unknown.bin", file.Length);
+        await PutBlobAsync(upload.UploadLink, file);
+
+        using var confirmed = await ConfirmAsync(manager, release, upload);
+
+        Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
+        Assert.Equal("Zonsopgang", Assert.Single(await ListTracksAsync(manager, release)).Title);
+    }
+
     /// <summary>The blobs stored for a Track, as blob storage itself reports them.</summary>
     private async Task<List<string>> BlobsOfAsync(TrackUpload upload)
     {

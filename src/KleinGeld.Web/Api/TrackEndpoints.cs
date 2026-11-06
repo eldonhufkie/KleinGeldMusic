@@ -64,7 +64,7 @@ internal static class TrackEndpoints
         });
 
         api.MapPost("/releases/{id:guid}/tracks/{trackId:guid}/confirm", async (
-            Guid id, Guid trackId, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links, AudioProbe probe) =>
+            Guid id, Guid trackId, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links, AudioProbe probe, TagReader tagReader) =>
         {
             var memberId = caller.MemberId();
             var track = await db.Tracks
@@ -91,17 +91,20 @@ internal static class TrackEndpoints
             }
 
             // The size the browser declared proves nothing, and a SAS link can't limit what is uploaded to it.
-            var problem = size > TrackUploadForm.MaxFileSize
-                ? "A Track's file can be at most 500 MB."
-                : await probe.IsAcceptedAudioAsync(links.ForServerReading(AudioContainer, track.OriginalBlobName))
-                    ? null
-                    : "That file isn't audio we accept. Use FLAC, WAV, AIFF, ALAC, MP3 or AAC.";
-            if (problem is not null)
+            var format = size > TrackUploadForm.MaxFileSize
+                ? null
+                : await probe.AcceptedFormatAsync(links.ForServerReading(AudioContainer, track.OriginalBlobName));
+            if (format is null)
             {
+                var problem = size > TrackUploadForm.MaxFileSize
+                    ? "A Track's file can be at most 500 MB."
+                    : "That file isn't audio we accept. Use FLAC, WAV, AIFF, ALAC, MP3 or AAC.";
                 await RemoveAsync(db, links, id, trackId, caller);
                 return Results.Problem(problem, statusCode: StatusCodes.Status422UnprocessableEntity);
             }
 
+            var tags = await tagReader.ReadAsync(track.OriginalBlobName, format);
+            track.Title = tags.Title ?? track.Title;
             track.Status = TrackStatus.Converting;
             await db.SaveChangesAsync();
             return Results.Ok(ToSummary(track));
