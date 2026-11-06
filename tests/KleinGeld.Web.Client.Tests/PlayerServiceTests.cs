@@ -15,7 +15,7 @@ public sealed class PlayerServiceTests
     public PlayerServiceTests()
     {
         _links.Add(Track.Id, Link);
-        _player = new PlayerService(_audio, _links);
+        _player = new PlayerService(_audio, _links, new RotatingShuffler());
     }
 
     [Fact]
@@ -477,6 +477,302 @@ public sealed class PlayerServiceTests
         Assert.Equal(album, _player.Queue);
     }
 
+    [Fact]
+    public async Task Repeat_all_wraps_to_the_start_when_the_last_Track_ends()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 1);
+        _player.SetRepeat(RepeatMode.All);
+
+        await _audio.EndAsync();
+
+        Assert.Equal(album[0], _player.Current);
+        Assert.Equal(LinkOf(album[0]), _audio.PlayingSource);
+        Assert.True(_player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task Repeat_all_wraps_to_the_start_on_Next_from_the_last_Track()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 1);
+        _player.SetRepeat(RepeatMode.All);
+
+        await _player.NextAsync();
+
+        Assert.Equal(album[0], _player.Current);
+        Assert.True(_player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task Repeat_one_plays_the_Track_again_from_a_fresh_play_link_when_it_ends_by_itself()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 0);
+        _player.SetRepeat(RepeatMode.One);
+        var fresh = new Uri("https://blobs.example/fresh.m4a");
+        _links.Add(album[0].Id, fresh);
+        _audio.Report(new AudioProgress(TimeSpan.FromSeconds(180), TimeSpan.FromSeconds(180), IsPlaying: false));
+
+        await _audio.EndAsync();
+
+        Assert.Equal(album[0], _player.Current);
+        Assert.Equal(fresh.ToString(), _audio.PlayingSource);
+        Assert.True(_player.IsPlaying);
+        Assert.Equal(TimeSpan.Zero, _player.Position);
+    }
+
+    [Fact]
+    public async Task Repeat_one_loops_the_last_Track_when_it_ends_by_itself()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 1);
+        _player.SetRepeat(RepeatMode.One);
+        _audio.Report(new AudioProgress(TimeSpan.FromSeconds(180), TimeSpan.FromSeconds(180), IsPlaying: false));
+
+        await _audio.EndAsync();
+
+        Assert.Equal(album[1], _player.Current);
+        Assert.True(_player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task With_repeat_one_Next_still_moves_on()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 0);
+        _player.SetRepeat(RepeatMode.One);
+
+        await _player.NextAsync();
+
+        Assert.Equal(album[1], _player.Current);
+    }
+
+    [Fact]
+    public async Task With_repeat_one_the_Next_media_key_still_moves_on()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 0);
+        _player.SetRepeat(RepeatMode.One);
+
+        await _audio.PressAsync(new MediaCommand(MediaAction.Next));
+
+        Assert.Equal(album[1], _player.Current);
+    }
+
+    [Fact]
+    public async Task With_repeat_one_Next_on_the_last_Track_stops_there()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 1);
+        _player.SetRepeat(RepeatMode.One);
+
+        await _player.NextAsync();
+
+        Assert.Equal(album[1], _player.Current);
+        Assert.False(_player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task Choosing_repeat_tells_the_player_bar()
+    {
+        var changes = 0;
+        _player.Changed += () => changes++;
+
+        _player.SetRepeat(RepeatMode.All);
+
+        Assert.Equal(RepeatMode.All, _player.Repeat);
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public async Task With_shuffle_on_Play_starts_with_the_pressed_Track_and_the_rest_random()
+    {
+        var album = Album("Een", "Twee", "Drie", "Vier", "Vijf");
+        _player.SetShuffle(true);
+
+        await _player.PlayAsync(album, 2);
+
+        Assert.Equal(["Drie", "Twee", "Vier", "Vijf", "Een"], Titles());
+        Assert.Equal(album[2], _player.Current);
+        Assert.Equal(LinkOf(album[2]), _audio.PlayingSource);
+    }
+
+    [Fact]
+    public async Task With_shuffle_on_Play_still_leaves_Unavailable_Tracks_out()
+    {
+        var album = Album("Een", "Twee", "Drie");
+        album[0] = album[0] with { IsAvailable = false };
+        _player.SetShuffle(true);
+
+        await _player.PlayAsync(album, 1);
+
+        Assert.Equal(["Twee", "Drie"], Titles());
+    }
+
+    [Fact]
+    public async Task Turning_shuffle_on_mid_Queue_shuffles_only_the_upcoming_Tracks()
+    {
+        var album = Album("Een", "Twee", "Drie", "Vier", "Vijf");
+        await _player.PlayAsync(album, 1);
+
+        _player.SetShuffle(true);
+
+        Assert.Equal(["Een", "Twee", "Vier", "Vijf", "Drie"], Titles());
+        Assert.Equal(album[1], _player.Current);
+    }
+
+    [Fact]
+    public async Task Turning_shuffle_on_leaves_the_current_Track_playing()
+    {
+        var album = Album("Een", "Twee", "Drie");
+        await _player.PlayAsync(album, 0);
+        var changes = 0;
+        _player.Changed += () => changes++;
+
+        _player.SetShuffle(true);
+
+        Assert.True(_player.Shuffle);
+        Assert.Equal(LinkOf(album[0]), _audio.PlayingSource);
+        Assert.Single(_audio.Metadata);
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public async Task Turning_shuffle_on_twice_shuffles_once()
+    {
+        await _player.PlayAsync(Album("Een", "Twee", "Drie"), 0);
+
+        _player.SetShuffle(true);
+        _player.SetShuffle(true);
+
+        Assert.Equal(["Een", "Drie", "Twee"], Titles());
+    }
+
+    [Fact]
+    public async Task Turning_shuffle_off_restores_the_original_order_of_the_upcoming_Tracks()
+    {
+        await _player.PlayAsync(Album("Een", "Twee", "Drie", "Vier", "Vijf"), 0);
+        _player.SetShuffle(true);
+        await _player.NextAsync();
+        Assert.Equal(["Een", "Drie", "Vier", "Vijf", "Twee"], Titles());
+
+        _player.SetShuffle(false);
+
+        Assert.Equal(["Een", "Drie", "Twee", "Vier", "Vijf"], Titles());
+        Assert.Equal("Drie", _player.Current?.Title);
+    }
+
+    [Fact]
+    public async Task Turning_shuffle_off_puts_every_upcoming_Track_after_the_pressed_one()
+    {
+        _player.SetShuffle(true);
+        await _player.PlayAsync(Album("Een", "Twee", "Drie", "Vier"), 2);
+
+        _player.SetShuffle(false);
+
+        Assert.Equal(["Drie", "Een", "Twee", "Vier"], Titles());
+        Assert.Equal(0, _player.CurrentIndex);
+    }
+
+    [Fact]
+    public async Task Turning_shuffle_off_tells_apart_a_Track_that_is_in_the_list_twice()
+    {
+        var album = Album("Een", "Twee", "Drie");
+        await _player.PlayAsync([album[0], album[1], album[2], album[1], album[0]], 0);
+        _player.SetShuffle(true);
+        Assert.Equal(["Een", "Drie", "Twee", "Een", "Twee"], Titles());
+
+        _player.SetShuffle(false);
+
+        Assert.Equal(["Een", "Twee", "Drie", "Twee", "Een"], Titles());
+    }
+
+    [Fact]
+    public async Task A_Play_next_Track_keeps_its_place_when_shuffle_turns_on_and_off()
+    {
+        await _player.PlayAsync(Album("Een", "Twee", "Drie", "Vier"), 0);
+        await _player.PlayNextAsync(Album("Extra")[0]);
+
+        _player.SetShuffle(true);
+        Assert.Equal(["Een", "Extra", "Drie", "Vier", "Twee"], Titles());
+
+        _player.SetShuffle(false);
+        Assert.Equal(["Een", "Extra", "Twee", "Drie", "Vier"], Titles());
+    }
+
+    [Fact]
+    public async Task An_Add_to_queue_Track_keeps_its_place_when_shuffle_turns_on_and_off()
+    {
+        await _player.PlayAsync(Album("Een", "Twee", "Drie", "Vier"), 0);
+        await _player.AddToQueueAsync(Album("Extra")[0]);
+
+        _player.SetShuffle(true);
+        Assert.Equal(["Een", "Drie", "Vier", "Twee", "Extra"], Titles());
+
+        _player.SetShuffle(false);
+        Assert.Equal(["Een", "Twee", "Drie", "Vier", "Extra"], Titles());
+    }
+
+    [Fact]
+    public async Task Tracks_added_while_shuffled_keep_their_place_when_shuffle_turns_off()
+    {
+        await _player.PlayAsync(Album("Een", "Twee", "Drie", "Vier"), 0);
+        _player.SetShuffle(true);
+        await _player.PlayNextAsync(Album("Eerst")[0]);
+        await _player.AddToQueueAsync(Album("Laatst")[0]);
+        Assert.Equal(["Een", "Eerst", "Drie", "Vier", "Twee", "Laatst"], Titles());
+
+        _player.SetShuffle(false);
+
+        Assert.Equal(["Een", "Eerst", "Twee", "Drie", "Vier", "Laatst"], Titles());
+    }
+
+    [Fact]
+    public async Task A_Track_removed_while_shuffled_stays_out_when_shuffle_turns_off()
+    {
+        await _player.PlayAsync(Album("Een", "Twee", "Drie", "Vier"), 0);
+        _player.SetShuffle(true);
+
+        _player.RemoveFromQueue(2);
+        _player.SetShuffle(false);
+
+        Assert.Equal(["Een", "Twee", "Drie"], Titles());
+    }
+
+    [Fact]
+    public async Task Repeat_all_wraps_to_the_start_of_the_shuffled_Queue()
+    {
+        _player.SetShuffle(true);
+        _player.SetRepeat(RepeatMode.All);
+        await _player.PlayAsync(Album("Een", "Twee", "Drie"), 1);
+        await _player.NextAsync();
+        await _player.NextAsync();
+
+        await _player.NextAsync();
+
+        Assert.Equal("Twee", _player.Current?.Title);
+        Assert.Equal(["Twee", "Drie", "Een"], Titles());
+    }
+
+    [Fact]
+    public async Task A_play_link_arriving_after_shuffle_shifted_the_Queue_is_dropped()
+    {
+        var album = Album("Een", "Twee", "Drie");
+        await _player.PlayAsync(album, 0);
+        var slow = _links.Hold(album[1].Id);
+        var next = _player.NextAsync();
+
+        _player.SetShuffle(true);
+        slow.SetResult();
+        await next;
+
+        Assert.Equal(album[0], _player.Current);
+        Assert.Equal(LinkOf(album[0]), _audio.PlayingSource);
+    }
+
+    private List<string> Titles() => _player.Queue.Select(track => track.Title).ToList();
+
     private List<PlayerTrack> Album(params string[] titles)
     {
         var album = titles.Select(title => new PlayerTrack(Guid.CreateVersion7(), title, "De Kleingeld")).ToList();
@@ -489,6 +785,23 @@ public sealed class PlayerServiceTests
     }
 
     private static string LinkOf(PlayerTrack track) => $"https://blobs.example/{track.Id}.m4a";
+
+    /// <summary>
+    /// The one "random" order the expected Queues are worked out from: the first goes last. Doing it twice doesn't undo
+    /// it, so shuffling again can't pass for restoring the order.
+    /// </summary>
+    private sealed class RotatingShuffler : IShuffler
+    {
+        public void Shuffle<T>(T[] items)
+        {
+            if (items.Length > 0)
+            {
+                var first = items[0];
+                Array.Copy(items, 1, items, 0, items.Length - 1);
+                items[^1] = first;
+            }
+        }
+    }
 
     private sealed class FakePlayLinks : IPlayLinkSource
     {
