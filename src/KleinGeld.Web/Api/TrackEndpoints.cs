@@ -9,7 +9,7 @@ namespace KleinGeld.Web.Api;
 
 internal static class TrackEndpoints
 {
-    public const string AudioContainer = "audio";
+    public const string AudioContainer = Track.AudioContainer;
 
     /// <summary>Endpoints for adding audio to a Release: request a link, upload to it, confirm; and for removing it.</summary>
     public static void MapTrackEndpoints(this RouteGroupBuilder api)
@@ -190,5 +190,5 @@ internal static class TrackEndpoints
         return title.Length > ReleaseForm.TitleMaxLength ? title[..ReleaseForm.TitleMaxLength] : title;
     }
 
-    private static TrackSummary ToSummary(Track track) => new(track.Id, track.Title, track.Position, track.Status);
+    private static TrackSummary ToSummary(Track track) => new(track.Id, track.Title, track.Position, track.Status, track.Duration);
 }

@@ -227,6 +227,13 @@ namespace KleinGeld.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ConvertedBlobName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<TimeSpan?>("Duration")
+                        .HasColumnType("interval");
+
                     b.Property<string>("OriginalBlobName")
                         .IsRequired()
                         .HasMaxLength(200)
