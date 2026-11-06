@@ -1,0 +1,105 @@
+@page "/releases/{Id:guid}/{Slug?}"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject PlayerService Player
+
+@* A Release as Members see it. Managing Members and the Admin see their unpublished Releases here too. *@
+
+<PageTitle>@(_release?.Title ?? "Release") · KleinGeld Music</PageTitle>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+else if (_release is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <div class="release-header">
+        @if (_release.Cover is not null)
+        {
+            <img class="cover-art" src="@_release.Cover.Large" alt="Cover of @_release.Title" />
+        }
+        <div>
+            <h1>@_release.Title</h1>
+            <p><a href="artists/@_release.ArtistId">@_release.ArtistName</a></p>
+            <p>
+                @_release.Type · @($"{_release.ReleaseDate:d MMMM yyyy}")
+                @if (_release.Genre is not null)
+                {
+                    <span> · @_release.Genre</span>
+                }
+                <span> · @TotalDuration</span>
+            </p>
+            @if (_release.Description is not null)
+            {
+                <p>@_release.Description</p>
+            }
+        </div>
+    </div>
+
+    <ol class="release-tracks">
+        @foreach (var track in _tracks)
+        {
+            <li @key="track.Id">
+                <span>@track.Position</span>
+                <button type="button" disabled="@(track.Status != TrackStatus.Ready)" aria-label="Play @track.Title"
+                        @onclick="() => Player.PlayAsync(new PlayerTrack(track.Id, track.Title))">Play</button>
+                <span class="release-track-title">
+                    @track.Title
+                    @if (track.FeaturedArtists is not null)
+                    {
+                        <span>feat. @track.FeaturedArtists</span>
+                    }
+                    <TrackBadges Track="track" />
+                </span>
+                <span>@track.Duration?.ToString(@"m\:ss")</span>
+            </li>
+        }
+    </ol>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [Parameter]
+    public string? Slug { get; set; }
+
+    private ReleaseDetails? _release;
+    private List<TrackSummary> _tracks = [];
+    private bool _failed;
+
+    private string TotalDuration
+    {
+        get
+        {
+            var total = TimeSpan.FromTicks(_tracks.Sum(t => t.Duration?.Ticks ?? 0));
+            return total.ToString(total.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _release = await Http.GetFromJsonAsync<ReleaseDetails>($"api/releases/{Id}/{Slug}");
+            _tracks = await Http.GetFromJsonAsync<List<TrackSummary>>($"api/tracks?releaseId={Id}") ?? [];
+            if (_release!.Slug != Slug)
+            {
+                Navigation.NavigateTo($"releases/{_release.Id}/{_release.Slug}", replace: true);
+            }
+        }
+        catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.NotFound)
+        {
+            Navigation.NotFound();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+}

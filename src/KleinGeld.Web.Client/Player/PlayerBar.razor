@@ -1,0 +1,67 @@
+@implements IDisposable
+@inject PlayerService Player
+@inject JsAudioElement Audio
+
+@*
+    The one audio element and its controls. MainLayout keeps this outside @Body and outside AuthorizeView, which can
+    drop its content while it re-checks: either way the element would go, and the music with it.
+*@
+
+<audio @ref="_element" preload="metadata"></audio>
+
+@if (Player.Current is not null || Player.Notice is not null)
+{
+    <section class="player-bar" aria-label="Player">
+        @if (Player.Notice is not null)
+        {
+            <p role="alert" class="player-notice">@Player.Notice</p>
+        }
+        @if (Player.Current is not null)
+        {
+            <button type="button" @onclick="ToggleAsync">@(Player.IsPlaying ? "Pause" : "Play")</button>
+            <span class="player-title">@Player.Current.Title</span>
+            <span>@Format(_seekingTo ?? Player.Position)</span>
+            <input type="range" class="player-seek" aria-label="Seek" min="0" step="1"
+                   max="@((int)Player.Duration.TotalSeconds)"
+                   value="@((int)(_seekingTo ?? Player.Position).TotalSeconds)"
+                   @oninput="ShowSeeking" @onchange="SeekAsync" />
+            <span>@Format(Player.Duration)</span>
+        }
+    </section>
+}
+
+@code {
+    private ElementReference _element;
+
+    // While the handle is dragged it follows the Member, not the audio.
+    private TimeSpan? _seekingTo;
+
+    protected override void OnInitialized() => Player.Changed += Refresh;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Audio.AttachAsync(_element);
+        }
+    }
+
+    public void Dispose() => Player.Changed -= Refresh;
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private Task ToggleAsync() => Player.IsPlaying ? Player.PauseAsync() : Player.ResumeAsync();
+
+    private void ShowSeeking(ChangeEventArgs e) => _seekingTo = Seconds(e);
+
+    private async Task SeekAsync(ChangeEventArgs e)
+    {
+        await Player.SeekAsync(Seconds(e));
+        _seekingTo = null;
+    }
+
+    private static TimeSpan Seconds(ChangeEventArgs e) =>
+        TimeSpan.FromSeconds(double.Parse(e.Value!.ToString()!, System.Globalization.CultureInfo.InvariantCulture));
+
+    private static string Format(TimeSpan time) => time.ToString(time.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
+}

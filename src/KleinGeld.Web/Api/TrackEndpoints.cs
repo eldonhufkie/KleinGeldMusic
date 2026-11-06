@@ -28,6 +28,23 @@ internal static class TrackEndpoints
                 : Results.Ok(release.Tracks.OrderBy(t => t.Position).Select(ToSummary));
         });
 
+        api.MapGet("/tracks/{id:guid}/play-link", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, PlayLinks links) =>
+        {
+            // The access rule is the visibility rule: whoever may see a Track's Release may play the Track.
+            var track = await db.Releases.VisibleTo(caller).SelectMany(r => r.Tracks).SingleOrDefaultAsync(t => t.Id == id);
+            if (track is null)
+            {
+                return Results.NotFound();
+            }
+
+            if (track.Status != TrackStatus.Ready)
+            {
+                return Results.Problem("This Track isn't ready to play yet.", statusCode: StatusCodes.Status409Conflict);
+            }
+
+            return Results.Ok(await links.ForAsync(track.ConvertedBlobName!));
+        });
+
         api.MapPost("/releases/{id:guid}/tracks", async (Guid id, TrackUploadForm form, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links) =>
         {
             Track? added = null;

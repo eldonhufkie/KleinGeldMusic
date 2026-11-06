@@ -16,6 +16,7 @@ builder.AddNpgsqlDbContext<KleinGeldDbContext>("kleingeld", settings => settings
 builder.AddAzureBlobServiceClient("blobs");
 builder.Services.AddHostedService<BlobCorsSetup>();
 builder.Services.AddSingleton<BlobLinks>();
+builder.Services.AddSingleton<PlayLinks>();
 builder.Services.AddSingleton<CoverStore>();
 builder.Services.AddSingleton<AudioProbe>();
 builder.Services.AddSingleton<TagReader>();
@@ -29,6 +30,8 @@ builder.AddEmailSender();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IManagedArtistsState, ServerManagedArtistsState>();
+builder.Services.AddScoped<KleinGeld.Web.Client.Player.IPlayLinkSource, ServerPlayLinkSource>();
+KleinGeld.Web.Client.Player.PlayerRegistration.AddPlayer(builder.Services);
 
 builder.Services.AddProblemDetails();
 // Checks API request bodies against their DataAnnotations and answers 400 with the errors.
