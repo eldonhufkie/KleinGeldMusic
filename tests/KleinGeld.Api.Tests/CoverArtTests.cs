@@ -35,24 +35,35 @@ public sealed class CoverArtTests(KleinGeldApp app) : IAsyncLifetime
         Assert.NotNull(read!.Cover);
     }
 
-    public static TheoryData<string, byte[], string> BadCovers => new()
+    // The rows carry only names: xUnit formats theory arguments, which turns a 20 MB byte[] into gigabytes.
+    public static TheoryData<string, string> BadCovers => new()
     {
-        { "non-square", Image(1200, 1000), "square" },
-        { "too small", Image(999, 999), "at least 1000×1000" },
-        { "WebP", Image(1200, 1200, SKEncodedImageFormat.Webp), "JPEG or PNG" },
-        { "not an image", "Dit is geen plaatje"u8.ToArray(), "JPEG or PNG" },
-        { "over 20 MB", [.. Image(1200, 1200), .. new byte[20 * 1024 * 1024]], "20 MB" },
+        { "non-square", "square" },
+        { "too small", "at least 1000×1000" },
+        { "WebP", "JPEG or PNG" },
+        { "not an image", "JPEG or PNG" },
+        { "over 20 MB", "20 MB" },
+    };
+
+    private static byte[] BadCover(string name) => name switch
+    {
+        "non-square" => Image(1200, 1000),
+        "too small" => Image(999, 999),
+        "WebP" => Image(1200, 1200, SKEncodedImageFormat.Webp),
+        "not an image" => "Dit is geen plaatje"u8.ToArray(),
+        "over 20 MB" => [.. Image(1200, 1200), .. new byte[20 * 1024 * 1024]],
+        _ => throw new ArgumentOutOfRangeException(nameof(name)),
     };
 
     [Theory]
     [MemberData(nameof(BadCovers))]
-    public async Task A_bad_cover_is_refused_with_the_reason_and_leaves_nothing_behind(string name, byte[] file, string reason)
+    public async Task A_bad_cover_is_refused_with_the_reason_and_leaves_nothing_behind(string name, string reason)
     {
         using var manager = await app.LoginAsNewMemberAsync();
         var release = await CreateReleaseAsync(manager);
 
         var link = await RequestUploadLinkAsync(manager, release);
-        await UploadAsync(link, file);
+        await UploadAsync(link, BadCover(name));
         using var confirmed = await ConfirmAsync(manager, release, link);
 
         Assert.True(confirmed.StatusCode == HttpStatusCode.BadRequest, name);
