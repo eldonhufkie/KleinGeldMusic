@@ -45,4 +45,18 @@ internal static class MemberEmails
             "",
             "The link works for 15 minutes. If you didn't ask for this, you can ignore this email.",
         ]));
+
+    /// <summary>Email 4: sent to the new address, with the link that makes it the Member's login email.</summary>
+    public static OutgoingEmail ConfirmNewEmail(MailboxAddress newAddress, Uri confirmLink) =>
+        new(newAddress, "Confirm your new KleinGeld Music email", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            "Someone asked to use this email address to log in to KleinGeld Music.",
+            "Confirm it here, and it replaces the old one:",
+            "",
+            confirmLink.ToString(),
+            "",
+            "The link works for 15 minutes. If you didn't ask for this, you can ignore this email.",
+        ]));
 }
