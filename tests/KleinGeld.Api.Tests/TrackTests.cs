@@ -192,6 +192,142 @@ public sealed class TrackTests(KleinGeldApp app)
         Assert.Equal([upload.Track], await ListTracksAsync(admin, release));
     }
 
+    [Fact]
+    public async Task A_managing_Member_sets_a_Track_s_title_Single_mark_featured_Artists_and_explicit_flag()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+        var upload = await RequestUploadAsync(manager, release, "een.wav", 1000);
+
+        using var saved = await PutTrackAsync(manager, release, upload, new TrackForm
+        {
+            Title = "Regen op het dak",
+            SingleMark = true,
+            FeaturedArtists = "Anna & De Buren",
+            Explicit = true,
+        });
+
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var expected = upload.Track with
+        {
+            Title = "Regen op het dak",
+            SingleMark = true,
+            FeaturedArtists = "Anna & De Buren",
+            Explicit = true,
+        };
+        Assert.Equal(expected, await saved.Content.ReadFromJsonAsync<TrackSummary>());
+        Assert.Equal([expected], await ListTracksAsync(manager, release));
+    }
+
+    [Theory]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("Titel", 201)]
+    public async Task A_Track_needs_a_title_and_details_within_their_limits(string title, int? featuredLength)
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+        var upload = await RequestUploadAsync(manager, release, "een.wav", 1000);
+
+        using var saved = await PutTrackAsync(manager, release, upload, new TrackForm
+        {
+            Title = title,
+            FeaturedArtists = featuredLength is { } length ? new string('x', length) : null,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, saved.StatusCode);
+        Assert.Equal([upload.Track], await ListTracksAsync(manager, release));
+    }
+
+    [Fact]
+    public async Task Blank_featured_Artists_mean_there_are_none()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+        var upload = await RequestUploadAsync(manager, release, "een.wav", 1000);
+
+        using var saved = await PutTrackAsync(manager, release, upload, new TrackForm { Title = "een", FeaturedArtists = "   " });
+
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        Assert.Null(Assert.Single(await ListTracksAsync(manager, release)).FeaturedArtists);
+    }
+
+    [Fact]
+    public async Task Only_managing_Members_edit_a_Track_and_only_through_its_own_Release()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var otherMember = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreateDraftAsync(manager);
+        var otherRelease = await CreateDraftAsync(manager);
+        var upload = await RequestUploadAsync(manager, release, "een.wav", 1000);
+        var form = new TrackForm { Title = "Niet van jou" };
+
+        using var byMember = await PutTrackAsync(otherMember, release, upload, form);
+        using var byAdmin = await PutTrackAsync(admin, release, upload, form);
+        using var throughOtherRelease = await PutTrackAsync(manager, otherRelease, upload, form);
+
+        Assert.Equal(HttpStatusCode.NotFound, byMember.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, byAdmin.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, throughOtherRelease.StatusCode);
+        Assert.Equal([upload.Track], await ListTracksAsync(manager, release));
+    }
+
+    [Fact]
+    public async Task Reordering_a_Draft_renumbers_its_Tracks_to_follow_the_new_order()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+        var first = await RequestUploadAsync(manager, release, "een.wav", 1000);
+        var second = await RequestUploadAsync(manager, release, "twee.wav", 1000);
+        var third = await RequestUploadAsync(manager, release, "drie.wav", 1000);
+
+        using var reordered = await PutOrderAsync(manager, release, third, first, second);
+
+        Assert.Equal(HttpStatusCode.NoContent, reordered.StatusCode);
+        Assert.Equal(
+            [("drie", 1), ("een", 2), ("twee", 3)],
+            (await ListTracksAsync(manager, release)).Select(t => (t.Title, t.Position)));
+    }
+
+    [Fact]
+    public async Task An_order_that_is_not_exactly_the_Release_s_Tracks_is_refused_and_changes_nothing()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+        var otherRelease = await CreateDraftAsync(manager);
+        var first = await RequestUploadAsync(manager, release, "een.wav", 1000);
+        var second = await RequestUploadAsync(manager, release, "twee.wav", 1000);
+        var elsewhere = await RequestUploadAsync(manager, otherRelease, "elders.wav", 1000);
+
+        using var missing = await PutOrderAsync(manager, release, second);
+        using var repeated = await PutOrderAsync(manager, release, second, second);
+        using var foreign = await PutOrderAsync(manager, release, second, first, elsewhere);
+
+        Assert.Equal(HttpStatusCode.Conflict, missing.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, repeated.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, foreign.StatusCode);
+        Assert.Equal([first.Track, second.Track], await ListTracksAsync(manager, release));
+    }
+
+    [Fact]
+    public async Task Only_managing_Members_reorder_Tracks()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var otherMember = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreateDraftAsync(manager);
+        var first = await RequestUploadAsync(manager, release, "een.wav", 1000);
+        var second = await RequestUploadAsync(manager, release, "twee.wav", 1000);
+
+        using var byMember = await PutOrderAsync(otherMember, release, second, first);
+        using var byAdmin = await PutOrderAsync(admin, release, second, first);
+
+        Assert.Equal(HttpStatusCode.NotFound, byMember.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, byAdmin.StatusCode);
+        Assert.Equal([first.Track, second.Track], await ListTracksAsync(manager, release));
+    }
+
     /// <summary>The blobs stored for a Track, as blob storage itself reports them.</summary>
     private async Task<List<string>> BlobsOfAsync(TrackUpload upload)
     {
@@ -233,6 +369,12 @@ public sealed class TrackTests(KleinGeldApp app)
 
     private static Task<HttpResponseMessage> ConfirmAsync(HttpClient member, ReleaseDetails release, TrackUpload upload) =>
         member.PostAsync($"/api/releases/{release.Id}/tracks/{upload.Track.Id}/confirm", null);
+
+    private static Task<HttpResponseMessage> PutTrackAsync(HttpClient member, ReleaseDetails release, TrackUpload upload, TrackForm form) =>
+        member.PutAsJsonAsync($"/api/releases/{release.Id}/tracks/{upload.Track.Id}", form);
+
+    private static Task<HttpResponseMessage> PutOrderAsync(HttpClient member, ReleaseDetails release, params TrackUpload[] order) =>
+        member.PutAsJsonAsync($"/api/releases/{release.Id}/tracks/order", new TrackOrderForm { TrackIds = [.. order.Select(u => u.Track.Id)] });
 
     private static async Task<List<TrackSummary>> ListTracksAsync(HttpClient member, ReleaseDetails release) =>
         (await member.GetFromJsonAsync<List<TrackSummary>>($"/api/tracks?releaseId={release.Id}"))!;

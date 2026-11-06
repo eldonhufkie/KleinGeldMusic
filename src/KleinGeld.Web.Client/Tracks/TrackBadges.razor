@@ -1,0 +1,15 @@
+@* The 'S' and 'E' badges of a Track row. They belong on every Track row and never on a Release card. *@
+
+@if (Track.SingleMark)
+{
+    <span class="track-badge" title="Also out as a Single">S</span>
+}
+@if (Track.Explicit)
+{
+    <span class="track-badge" title="Explicit">E</span>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public TrackSummary Track { get; set; } = null!;
+}

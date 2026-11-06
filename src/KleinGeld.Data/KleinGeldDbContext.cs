@@ -51,6 +51,7 @@ public sealed class KleinGeldDbContext(DbContextOptions<KleinGeldDbContext> opti
         builder.Entity<Track>(track =>
         {
             track.Property(t => t.Title).HasMaxLength(ReleaseForm.TitleMaxLength);
+            track.Property(t => t.FeaturedArtists).HasMaxLength(TrackForm.FeaturedArtistsMaxLength);
             track.Property(t => t.Status).HasConversion<string>().HasMaxLength(16);
             track.Property(t => t.OriginalBlobName).HasMaxLength(200);
             track.HasOne(t => t.Release).WithMany(r => r.Tracks).OnDelete(DeleteBehavior.Cascade);
