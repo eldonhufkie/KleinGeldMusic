@@ -34,7 +34,14 @@ internal static class MemberAuthenticationExtensions
             .AddIdentityCookies();
         builder.Services.AddAuthorization();
 
-        builder.Services.AddMemberIdentityCore(options => options.SignIn.RequireConfirmedAccount = true)
+        builder.Services.AddMemberIdentityCore(options =>
+            {
+                options.SignIn.RequireConfirmedAccount = true;
+                // A Member's email is their login, so no two can share one, even after changing it.
+                options.User.RequireUniqueEmail = true;
+                // The user name is the email, so whatever an email may contain is allowed.
+                options.User.AllowedUserNameCharacters = "";
+            })
             .AddSignInManager()
             .AddDefaultTokenProviders()
             // Replaces the default provider the line above registered, so emailed links follow TimeProvider.
