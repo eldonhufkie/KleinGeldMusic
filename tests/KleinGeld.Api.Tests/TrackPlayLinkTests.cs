@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using KleinGeld.Contracts;
+using SkiaSharp;
 
 namespace KleinGeld.Api.Tests;
 
@@ -39,6 +40,34 @@ public sealed partial class TrackTests
 
         Assert.Equal(HttpStatusCode.NotFound, refused.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, notLoggedIn.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_play_link_brings_fresh_links_to_the_Release_s_cover_art_once_it_has_one()
+    {
+        await app.SetClockAsync(DateTimeOffset.UtcNow);
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+        var track = await UploadAsync(manager, release, "tone.flac");
+        await WaitUntilConvertedAsync(manager, release, track);
+        Assert.Null((await RequestPlayLinkAsync(manager, track)).Cover);
+
+        using var uploadLink = await manager.PostAsync($"/api/releases/{release.Id}/cover/upload-link", null);
+        var upload = (await uploadLink.Content.ReadFromJsonAsync<UploadLink>())!;
+        using var bitmap = new SKBitmap(1200, 1200);
+        bitmap.Erase(SKColors.Teal);
+        using var image = bitmap.Encode(SKEncodedImageFormat.Png, 90);
+        await PutBlobAsync(upload.Url, image.ToArray());
+        using var confirmed = await manager.PostAsJsonAsync(
+            $"/api/releases/{release.Id}/cover", new ConfirmUploadForm { UploadId = upload.UploadId });
+        Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
+
+        var cover = (await RequestPlayLinkAsync(manager, track)).Cover!;
+
+        using var small = await BlobStorage.GetAsync(cover.Small);
+        using var large = await BlobStorage.GetAsync(cover.Large);
+        Assert.Equal(HttpStatusCode.OK, small.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, large.StatusCode);
     }
 
     [Fact]

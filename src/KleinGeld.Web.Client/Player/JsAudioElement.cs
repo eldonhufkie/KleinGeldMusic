@@ -11,6 +11,8 @@ public sealed class JsAudioElement(IJSRuntime js) : IAudioElement, IAsyncDisposa
 
     public event Action<AudioProgress>? Progressed;
 
+    public event Func<MediaCommand, Task>? MediaCommanded;
+
     public async Task AttachAsync(ElementReference element)
     {
         _self = DotNetObjectReference.Create(this);
@@ -26,9 +28,18 @@ public sealed class JsAudioElement(IJSRuntime js) : IAudioElement, IAsyncDisposa
 
     public Task SeekAsync(TimeSpan position) => Module.InvokeVoidAsync("seek", position.TotalSeconds).AsTask();
 
+    public Task ShowMetadataAsync(MediaMetadata metadata) =>
+        Module.InvokeVoidAsync(
+            "showMetadata", metadata.Title, metadata.Artist, metadata.Cover?.Small, metadata.Cover?.Large).AsTask();
+
     [JSInvokable]
     public void Report(double position, double duration, bool isPlaying) =>
         Progressed?.Invoke(new AudioProgress(TimeSpan.FromSeconds(position), TimeSpan.FromSeconds(duration), isPlaying));
+
+    [JSInvokable]
+    public Task Command(string action, double position) =>
+        MediaCommanded?.Invoke(new MediaCommand(Enum.Parse<MediaAction>(action), TimeSpan.FromSeconds(position)))
+        ?? Task.CompletedTask;
 
     public async ValueTask DisposeAsync()
     {

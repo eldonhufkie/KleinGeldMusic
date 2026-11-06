@@ -28,21 +28,28 @@ internal static class TrackEndpoints
                 : Results.Ok(release.Tracks.OrderBy(t => t.Position).Select(ToSummary));
         });
 
-        api.MapGet("/tracks/{id:guid}/play-link", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, PlayLinks links) =>
+        api.MapGet("/tracks/{id:guid}/play-link", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, PlayLinks links, CoverStore covers) =>
         {
             // The access rule is the visibility rule: whoever may see a Track's Release may play the Track.
-            var track = await db.Releases.VisibleTo(caller).SelectMany(r => r.Tracks).SingleOrDefaultAsync(t => t.Id == id);
-            if (track is null)
+            var found = await db.Releases
+                .VisibleTo(caller)
+                .SelectMany(r => r.Tracks, (release, track) => new { ReleaseId = release.Id, release.CoverId, Track = track })
+                .SingleOrDefaultAsync(row => row.Track.Id == id);
+            if (found is null)
             {
                 return Results.NotFound();
             }
 
-            if (track.Status != TrackStatus.Ready)
+            if (found.Track.Status != TrackStatus.Ready)
             {
                 return Results.Problem("This Track isn't ready to play yet.", statusCode: StatusCodes.Status409Conflict);
             }
 
-            return Results.Ok(await links.ForAsync(track.ConvertedBlobName!));
+            var link = await links.ForAsync(found.Track.ConvertedBlobName!);
+            return Results.Ok(link with
+            {
+                Cover = found.CoverId is { } coverId ? covers.LinksTo(found.ReleaseId, coverId) : null,
+            });
         });
 
         api.MapPost("/releases/{id:guid}/tracks", async (Guid id, TrackUploadForm form, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links) =>

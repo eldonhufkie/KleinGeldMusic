@@ -4,7 +4,46 @@ let listener;
 
 function report() {
     const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
-    listener.invokeMethodAsync("Report", audio.currentTime, duration, !audio.paused && !audio.ended);
+    const isPlaying = !audio.paused && !audio.ended;
+    listener.invokeMethodAsync("Report", audio.currentTime, duration, isPlaying);
+    showProgress(duration, isPlaying);
+}
+
+function showProgress(duration, isPlaying) {
+    if (!("mediaSession" in navigator)) {
+        return;
+    }
+
+    navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+    if (duration > 0) {
+        navigator.mediaSession.setPositionState({
+            duration,
+            playbackRate: audio.playbackRate,
+            position: Math.min(audio.currentTime, duration),
+        });
+    }
+}
+
+// The names are the MediaAction values in IAudioElement.cs.
+function listenForMediaKeys() {
+    if (!("mediaSession" in navigator)) {
+        return;
+    }
+
+    const handlers = {
+        play: () => listener.invokeMethodAsync("Command", "Play", 0),
+        pause: () => listener.invokeMethodAsync("Command", "Pause", 0),
+        nexttrack: () => listener.invokeMethodAsync("Command", "Next", 0),
+        previoustrack: () => listener.invokeMethodAsync("Command", "Previous", 0),
+        seekto: details => listener.invokeMethodAsync("Command", "Seek", details.seekTime),
+    };
+    for (const [action, handler] of Object.entries(handlers)) {
+        try {
+            navigator.mediaSession.setActionHandler(action, handler);
+        } catch {
+            // This browser doesn't know the action; the others still work.
+        }
+    }
 }
 
 export function attach(element, dotNet) {
@@ -13,6 +52,18 @@ export function attach(element, dotNet) {
     for (const event of ["timeupdate", "durationchange", "play", "pause", "ended", "seeked"]) {
         audio.addEventListener(event, report);
     }
+    listenForMediaKeys();
+}
+
+export function showMetadata(title, artist, smallCover, largeCover) {
+    if (!("mediaSession" in navigator)) {
+        return;
+    }
+
+    const artwork = smallCover
+        ? [{ src: smallCover, sizes: "300x300" }, { src: largeCover, sizes: "1000x1000" }]
+        : [];
+    navigator.mediaSession.metadata = new MediaMetadata({ title, artist, artwork });
 }
 
 export async function play(source) {

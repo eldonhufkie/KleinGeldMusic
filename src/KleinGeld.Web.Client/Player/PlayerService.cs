@@ -19,6 +19,15 @@ public sealed class PlayerService
             IsPlaying = progress.IsPlaying;
             Changed?.Invoke();
         };
+        _audio.MediaCommanded += command => command.Action switch
+        {
+            MediaAction.Play => ResumeAsync(),
+            MediaAction.Pause => PauseAsync(),
+            MediaAction.Next => NextAsync(),
+            MediaAction.Previous => PreviousAsync(),
+            MediaAction.Seek => SeekAsync(command.Position),
+            _ => Task.CompletedTask,
+        };
     }
 
     public event Action? Changed;
@@ -59,7 +68,8 @@ public sealed class PlayerService
             return;
         }
 
-        await _audio.PlayAsync(link.ToString());
+        await _audio.ShowMetadataAsync(new MediaMetadata(track.Title, track.Artist, link.Cover));
+        await _audio.PlayAsync(link.Url.ToString());
         Current = track;
         Notice = null;
         Position = TimeSpan.Zero;
@@ -81,6 +91,12 @@ public sealed class PlayerService
         IsPlaying = true;
         Changed?.Invoke();
     }
+
+    /// <summary>Moves on to the next Track in the Queue. There is no Queue yet, so there is nothing to move to.</summary>
+    public Task NextAsync() => Task.CompletedTask;
+
+    /// <summary>Goes back in the Queue. There is no Queue yet, so there is nothing to go back to.</summary>
+    public Task PreviousAsync() => Task.CompletedTask;
 
     public async Task SeekAsync(TimeSpan position)
     {
