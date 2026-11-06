@@ -10,10 +10,10 @@ internal static class NewMembers
     private const string Password = "New-Member-Pa55word!";
 
     /// <summary>A client logged in as a Member nobody else has met, with the name they asked to join under.</summary>
-    public static async Task<HttpClient> LoginAsNewMemberAsync(this KleinGeldApp app, string? name = null)
+    public static async Task<HttpClient> LoginAsNewMemberAsync(this KleinGeldApp app, string? name = null, string? email = null)
     {
         name ??= $"Member {Guid.NewGuid():N}";
-        var email = $"{Guid.NewGuid():N}@example.test";
+        email ??= $"{Guid.NewGuid():N}@example.test";
 
         using var outsider = app.CreateWebClient();
         using var submitted = await outsider.PostAsJsonAsync("/api/join-requests", new JoinRequestForm

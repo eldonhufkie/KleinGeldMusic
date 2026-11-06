@@ -27,6 +27,9 @@ public sealed class Release
 
     public ReleaseStage Stage { get; set; } = ReleaseStage.Draft;
 
+    /// <summary>Why the Admin Rejected it; null unless it is Rejected, since a resubmission answers the reason.</summary>
+    public string? RejectionReason { get; set; }
+
     /// <summary>Names the blobs of the current cover art; null until one is uploaded.</summary>
     public Guid? CoverId { get; set; }
 

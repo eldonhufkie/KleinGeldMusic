@@ -35,6 +35,10 @@ else
                 <li>
                     <a href="my-releases/@release.Id/@release.Slug">@(release.Title.Length > 0 ? release.Title : "Untitled")</a>
                     <span class="stage-badge">@release.Stage</span>
+                    @if (release.RejectionReason is not null)
+                    {
+                        <p class="rejection-reason">@release.RejectionReason</p>
+                    }
                 </li>
             }
         </ul>

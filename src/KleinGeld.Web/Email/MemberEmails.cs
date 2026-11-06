@@ -1,3 +1,4 @@
+using KleinGeld.Data;
 using MimeKit;
 
 namespace KleinGeld.Web.Email;
@@ -30,6 +31,19 @@ internal static class MemberEmails
             "",
             "Kind regards,",
             "KleinGeld Music",
+        ]));
+
+    /// <summary>Email 8: the Admin Rejected a Release, with the reason.</summary>
+    public static OutgoingEmail ReleaseRejected(MailboxAddress manager, Release release) =>
+        new(manager, $"{release.Title} was rejected", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin rejected \"{release.Title}\" by {release.Artist.Name}:",
+            "",
+            release.RejectionReason!,
+            "",
+            "You can edit it under My Artists and submit it again.",
         ]));
 
     /// <summary>Email 3: Forgot password, with the link to choose a new one.</summary>

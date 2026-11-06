@@ -80,7 +80,7 @@ internal static class ArtistEndpoints
                     Releases = a.Releases
                         .OrderByDescending(r => r.ReleaseDate)
                         .ThenByDescending(r => r.Id)
-                        .Select(r => new ManagedRelease(r.Id, r.Title, r.Slug, r.Type, r.ReleaseDate, r.Stage))
+                        .Select(r => new ManagedRelease(r.Id, r.Title, r.Slug, r.Type, r.ReleaseDate, r.Stage, r.RejectionReason))
                         .ToList(),
                 })
                 .SingleOrDefaultAsync();

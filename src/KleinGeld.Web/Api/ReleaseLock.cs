@@ -27,6 +27,18 @@ internal static class ReleaseLock
     /// </summary>
     public static Task<IResult?> WithManagedReleaseLockedAsync(
         this KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, Func<Release, Task<IResult?>> change) =>
+        db.WithLockedAsync(db.Releases.Where(r => r.Id == id).ManagedBy(caller.MemberId()), id, change);
+
+    /// <summary>
+    /// <see cref="WithManagedReleaseLockedAsync"/> for the Admin's review, which needs no managing: the same lock
+    /// settles a review racing a Withdraw.
+    /// </summary>
+    public static Task<IResult?> WithReviewedReleaseLockedAsync(
+        this KleinGeldDbContext db, Guid id, Func<Release, Task<IResult?>> change) =>
+        db.WithLockedAsync(db.Releases.Where(r => r.Id == id), id, change);
+
+    private static Task<IResult?> WithLockedAsync(
+        this KleinGeldDbContext db, IQueryable<Release> releases, Guid id, Func<Release, Task<IResult?>> change) =>
         // Retries run the whole transaction again, so nothing tracked by a failed attempt may carry over.
         db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
@@ -34,11 +46,9 @@ internal static class ReleaseLock
             await using var transaction = await db.Database.BeginTransactionAsync();
             await db.Database.ExecuteSqlAsync($"""SELECT 1 FROM "Releases" WHERE "Id" = {id} FOR UPDATE""");
 
-            var release = await db.Releases
+            var release = await releases
                 .Include(r => r.Artist)
                 .Include(r => r.Tracks)
-                .Where(r => r.Id == id)
-                .ManagedBy(caller.MemberId())
                 .SingleOrDefaultAsync();
             if (release is null)
             {
