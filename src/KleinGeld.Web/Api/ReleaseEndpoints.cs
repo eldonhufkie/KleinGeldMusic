@@ -90,9 +90,9 @@ internal static class ReleaseEndpoints
             await db.SaveChangesAsync();
             await covers.DeleteAllAsync(id);
 
-            foreach (var track in release.Tracks)
+            foreach (var blobName in release.Tracks.SelectMany(t => t.BlobNames()))
             {
-                await links.Blob(TrackEndpoints.AudioContainer, track.OriginalBlobName).DeleteIfExistsAsync();
+                await links.Blob(TrackEndpoints.AudioContainer, blobName).DeleteIfExistsAsync();
             }
 
             return Results.NoContent();

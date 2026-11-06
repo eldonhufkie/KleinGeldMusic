@@ -31,6 +31,11 @@ var web = builder.AddProject<Projects.KleinGeld_Web>("web")
     .WithHttpHealthCheck("/health")
     .WithExternalHttpEndpoints();
 
+// Converts uploaded Tracks. Exactly one: the database's Track status is its only work state.
+var worker = builder.AddProject<Projects.KleinGeld_Worker>("worker")
+    .WithReference(database)
+    .WaitForCompletion(migrator);
+
 if (deployment is null)
 {
     // Keeps dev data between runs. The API tests turn it off so every test run starts from an empty database.
@@ -41,6 +46,7 @@ if (deployment is null)
 
     var blobs = builder.AddAzureStorage("storage").RunAsEmulator().AddBlobs("blobs");
     web.WithReference(blobs).WaitFor(blobs);
+    worker.WithReference(blobs).WaitFor(blobs);
     SendEmailToMailPit(AddMailPit());
 }
 else
@@ -80,11 +86,19 @@ else
         Deployment.PublishLocally(service, deployment.WebHostPort, 8080);
     });
 
+    worker.PublishAsDockerComposeService((_, service) =>
+    {
+        service.Image = deployment.Image("worker");
+        deployment.LongRunning(service);
+    });
+
     if (deployment.Copy == Copy.Production)
     {
         // The real Azure audio account and real SMTP (Gmail or any other), both from secrets.env.
         // Switching mail provider is a change to the smtp connection string and email-from only.
-        web.WithReference(builder.AddConnectionString("blobs"))
+        var blobs = builder.AddConnectionString("blobs");
+        worker.WithReference(blobs);
+        web.WithReference(blobs)
             .WithReference(builder.AddConnectionString("smtp"))
             .WithEnvironment("Email__From", builder.AddParameter("email-from"));
     }
@@ -101,9 +115,10 @@ else
                 Deployment.PublishLocally(service, 10000, 10000);
             });
         var azuriteBlob = azurite.GetEndpoint("blob");
-        web.WithEnvironment(
-                "ConnectionStrings__blobs",
-                ReferenceExpression.Create($"{Deployment.AzuriteAccount}BlobEndpoint={azuriteBlob.Property(EndpointProperty.Url)}/devstoreaccount1;"))
+        var azuriteConnection = ReferenceExpression.Create(
+            $"{Deployment.AzuriteAccount}BlobEndpoint={azuriteBlob.Property(EndpointProperty.Url)}/devstoreaccount1;");
+        worker.WithEnvironment("ConnectionStrings__blobs", azuriteConnection).WaitFor(azurite);
+        web.WithEnvironment("ConnectionStrings__blobs", azuriteConnection)
             // Where browsers reach Azurite (the tailscale serve address), and the site's origin it must accept.
             .WithEnvironment("Blobs__PublicEndpoint", builder.AddParameter("blobs-public-endpoint"))
             .WithEnvironment("Blobs__CorsOrigin", builder.AddParameter("site-origin"))

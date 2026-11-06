@@ -4,8 +4,8 @@
 @inject IJSRuntime JS
 
 @*
-    The Track list of a Draft: adds audio files, straight to blob storage, with each upload's progress; edits each
-    Track's details; and reorders Tracks by dragging.
+    The Track list of a Draft: adds audio files, straight to blob storage, with each upload's progress; follows their
+    conversion; edits each Track's details; reorders Tracks by dragging; and removes or replaces a Failed Track's audio.
 *@
 
 <h2>Tracks</h2>
@@ -31,9 +31,14 @@
                     }
                     <TrackBadges Track="track" />
                     <span class="stage-badge">@track.Status</span>
+                    @track.Duration?.ToString(@"m\:ss")
                     @if (_progress.TryGetValue(track.Id, out var percent))
                     {
                         <progress max="100" value="@percent" aria-label="Upload of @track.Title">@percent%</progress>
+                    }
+                    @if (track.Status == TrackStatus.Failed)
+                    {
+                        <button type="button" disabled="@_busy" @onclick="() => _replacing = track">Replace audio</button>
                     }
                     <button type="button" disabled="@_busy" @onclick="() => StartEditing(track)">Edit</button>
                     <button type="button" disabled="@_busy" @onclick="() => RemoveAsync(track)">Remove</button>
@@ -64,6 +69,12 @@
     }
 </div>
 
+@if (_replacing is not null)
+{
+    <label for="replacement-file">New audio for @_replacing.Title</label>
+    <input id="replacement-file" type="file" accept="audio/*,.flac,.aiff,.aif,.m4a" disabled="@_busy" @ref="_replacementInput" @onchange="ReplaceChosenAsync" />
+}
+
 <label for="track-files">Add audio files</label>
 <input id="track-files" type="file" multiple accept="audio/*,.flac,.aiff,.aif,.m4a" disabled="@_busy" @ref="_input" @onchange="UploadChosenAsync" />
 
@@ -77,6 +88,9 @@
     private readonly List<string> _messages = [];
     private List<TrackSummary> _tracks = [];
     private ElementReference _input;
+    private readonly CancellationTokenSource _closing = new();
+    private ElementReference _replacementInput;
+    private TrackSummary? _replacing;
     private ElementReference _list;
     private DotNetObjectReference<ReleaseTracks>? _self;
     private TrackForm _form = new();
@@ -84,6 +98,29 @@
     private bool _busy;
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    protected override void OnInitialized() => _ = FollowConversionAsync();
+
+    /// <summary>The worker changes Tracks behind this page's back, so it looks again while any is Converting.</summary>
+    private async Task FollowConversionAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_closing.Token))
+            {
+                if (!_busy && _tracks.Any(t => t.Status == TrackStatus.Converting))
+                {
+                    await LoadAsync();
+                    StateHasChanged();
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The Member left the page.
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -95,7 +132,12 @@
         }
     }
 
-    public void Dispose() => _self?.Dispose();
+    public void Dispose()
+    {
+        _closing.Cancel();
+        _closing.Dispose();
+        _self?.Dispose();
+    }
 
     private void StartEditing(TrackSummary track)
     {
@@ -153,6 +195,56 @@
         }
     }
 
+    private async Task ReplaceChosenAsync()
+    {
+        var track = _replacing!;
+        _busy = true;
+        _messages.Clear();
+        try
+        {
+            var file = (await BlobUpload.ChosenFilesAsync(JS, _replacementInput))[0];
+            using var requested = await Http.PostAsJsonAsync(
+                $"api/releases/{ReleaseId}/tracks/{track.Id}/replace", new TrackUploadForm { FileName = file.Name, Size = file.Size });
+            if (!requested.IsSuccessStatusCode)
+            {
+                await ReportAsync(file, requested);
+                return;
+            }
+
+            var upload = (await requested.Content.ReadFromJsonAsync<TrackUpload>())!;
+            _progress[track.Id] = 0;
+            var uploaded = await BlobUpload.SendAsync(JS, _replacementInput, upload.UploadLink, percent =>
+            {
+                _progress[track.Id] = percent;
+                StateHasChanged();
+            }, 0);
+            _progress.Remove(track.Id);
+
+            if (uploaded)
+            {
+                using var confirmed = await Http.PostAsync($"api/releases/{ReleaseId}/tracks/{track.Id}/confirm", null);
+                if (!confirmed.IsSuccessStatusCode)
+                {
+                    await ReportAsync(file, confirmed);
+                }
+            }
+            else
+            {
+                _messages.Add($"{file.Name}: the upload failed. Remove the Track and add the file again.");
+            }
+            _replacing = null;
+            await LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _messages.Add("Something went wrong. Reload the page and try again.");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
     private async Task LoadAsync()
     {
         try
@@ -161,7 +253,11 @@
         }
         catch (HttpRequestException)
         {
-            _messages.Add("The Tracks couldn't be loaded. Reload the page and try again.");
+            const string message = "The Tracks couldn't be loaded. Reload the page and try again.";
+            if (!_messages.Contains(message))
+            {
+                _messages.Add(message);
+            }
         }
     }
 

@@ -5,6 +5,9 @@ namespace KleinGeld.Data;
 /// <summary>One piece of audio on exactly one Release.</summary>
 public sealed class Track
 {
+    /// <summary>The private blob container holding every Track's audio.</summary>
+    public const string AudioContainer = "audio";
+
     public Guid Id { get; init; } = Guid.CreateVersion7();
 
     public Guid ReleaseId { get; init; }
@@ -28,4 +31,17 @@ public sealed class Track
 
     /// <summary>Where the uploaded file is. Blob names are write-once: new audio gets a new name.</summary>
     public required string OriginalBlobName { get; set; }
+
+    /// <summary>Where the streamable <c>.m4a</c> is, once the Track is Ready.</summary>
+    public string? ConvertedBlobName { get; set; }
+
+    /// <summary>Known once the Track is Ready.</summary>
+    public TimeSpan? Duration { get; set; }
+
+    /// <summary>The upload under way replaces Failed audio, so a rejected file returns the Track to Failed.</summary>
+    public bool IsReplacingFailedAudio { get; set; }
+
+    /// <summary>Every blob holding this Track's audio.</summary>
+    public IEnumerable<string> BlobNames() =>
+        ConvertedBlobName is null ? [OriginalBlobName] : [OriginalBlobName, ConvertedBlobName];
 }
