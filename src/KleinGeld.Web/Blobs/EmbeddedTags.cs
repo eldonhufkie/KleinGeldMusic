@@ -5,9 +5,9 @@ using KleinGeld.Web.Api;
 namespace KleinGeld.Web.Blobs;
 
 /// <summary>What an audio file says about itself. Blank tags are null.</summary>
-internal sealed record EmbeddedTags(string? Title, string? Album, DateOnly? Date, string? Genre)
+internal sealed record EmbeddedTags(string? Title, string? Album, DateOnly? Date, string? Genre, byte[]? Cover)
 {
-    public static readonly EmbeddedTags None = new(null, null, null, null);
+    public static readonly EmbeddedTags None = new(null, null, null, null, null);
 }
 
 /// <summary>
@@ -29,7 +29,8 @@ internal sealed class TagReader(BlobLinks links, ILogger<TagReader> logger)
                 Clean(file.Tag.Album, ReleaseForm.TitleMaxLength),
                 // Most files hold a year at best, so the date is the first day of it.
                 file.Tag.Year is >= 1 and <= 9999 ? new DateOnly((int)file.Tag.Year, 1, 1) : null,
-                Clean(file.Tag.FirstGenre, ReleaseForm.GenreMaxLength));
+                Clean(file.Tag.FirstGenre, ReleaseForm.GenreMaxLength),
+                CoverIn(file.Tag.Pictures));
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -37,6 +38,12 @@ internal sealed class TagReader(BlobLinks links, ILogger<TagReader> logger)
             logger.LogWarning(e, "The tags of {BlobName} couldn't be read.", blobName);
             return EmbeddedTags.None;
         }
+    }
+
+    private static byte[]? CoverIn(TagLib.IPicture[] pictures)
+    {
+        var cover = pictures.FirstOrDefault(p => p.Type == TagLib.PictureType.FrontCover) ?? pictures.FirstOrDefault();
+        return cover?.Data.Data;
     }
 
     private static string MimeTypeOf(string format) => format switch

@@ -64,7 +64,7 @@ internal static class TrackEndpoints
         });
 
         api.MapPost("/releases/{id:guid}/tracks/{trackId:guid}/confirm", async (
-            Guid id, Guid trackId, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links, AudioProbe probe, TagReader tagReader) =>
+            Guid id, Guid trackId, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links, AudioProbe probe, TagReader tagReader, CoverStore covers) =>
         {
             var memberId = caller.MemberId();
             var track = await db.Tracks
@@ -77,7 +77,7 @@ internal static class TrackEndpoints
             }
             if (track.Status != TrackStatus.Uploading)
             {
-                return Results.Ok(ToSummary(track));
+                return Results.Ok(new TrackConfirmation(ToSummary(track)));
             }
 
             long size;
@@ -104,6 +104,17 @@ internal static class TrackEndpoints
             }
 
             var tags = await tagReader.ReadAsync(track.OriginalBlobName, format);
+
+            // Before taking the lock: this is the slow part. A cover that loses a race is an orphan for the clean-up.
+            Guid? coverId = null;
+            string? note = null;
+            if (track.Position == 1 && tags.Cover is not null && await db.Releases.AnyAsync(r => r.Id == id && r.CoverId == null))
+            {
+                string? refusal;
+                (coverId, refusal) = await covers.AcceptEmbeddedAsync(id, tags.Cover);
+                note = refusal is null ? null : $"The cover art in the file was skipped. {refusal}";
+            }
+
             Track? confirmed = null;
             var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
             {
@@ -118,11 +129,12 @@ internal static class TrackEndpoints
                 if (confirmed.Position == 1)
                 {
                     PreFill(release, tags);
+                    release.CoverId ??= coverId;
                 }
                 await db.SaveChangesAsync();
                 return null;
             });
-            return refused ?? Results.Ok(ToSummary(confirmed!));
+            return refused ?? Results.Ok(new TrackConfirmation(ToSummary(confirmed!), note));
         });
 
         api.MapDelete("/releases/{id:guid}/tracks/{trackId:guid}", (

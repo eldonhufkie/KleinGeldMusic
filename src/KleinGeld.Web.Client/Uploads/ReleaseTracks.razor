@@ -35,6 +35,10 @@
     [Parameter, EditorRequired]
     public Guid ReleaseId { get; set; }
 
+    /// <summary>A file was accepted, so its tags may have filled details of the Release.</summary>
+    [Parameter]
+    public EventCallback OnConfirmed { get; set; }
+
     private sealed record Problem(string? Detail);
 
     private readonly Dictionary<Guid, int> _progress = [];
@@ -108,6 +112,15 @@
             if (!confirmed.IsSuccessStatusCode)
             {
                 await ReportAsync(file, confirmed);
+            }
+            else
+            {
+                var confirmation = await confirmed.Content.ReadFromJsonAsync<TrackConfirmation>();
+                if (confirmation?.Note is { } note)
+                {
+                    _messages.Add($"{file.Name}: {note}");
+                }
+                await OnConfirmed.InvokeAsync();
             }
         }
         else

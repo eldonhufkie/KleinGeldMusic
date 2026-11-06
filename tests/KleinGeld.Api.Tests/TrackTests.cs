@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using KleinGeld.Contracts;
+using SkiaSharp;
 
 namespace KleinGeld.Api.Tests;
 
@@ -260,6 +261,62 @@ public sealed class TrackTests(KleinGeldApp app)
         Assert.Null(after.ReleaseDate);
         Assert.Null(after.Genre);
         Assert.Equal(["tone", "Zonsopgang"], (await ListTracksAsync(manager, release)).Select(t => t.Title));
+    }
+
+    [Fact]
+    public async Task Embedded_cover_art_that_passes_the_cover_checks_becomes_the_cover()
+    {
+        await app.SetClockAsync(DateTimeOffset.UtcNow);
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+
+        using var confirmed = await UploadAsync(manager, release, "tagged-square-cover.mp3");
+
+        var cover = (await ReadReleaseAsync(manager, release)).Cover;
+        Assert.NotNull(cover);
+        using var large = await BlobStorage.GetAsync(cover.Large);
+        Assert.Equal(HttpStatusCode.OK, large.StatusCode);
+        Assert.Null((await confirmed.Content.ReadFromJsonAsync<TrackConfirmation>())!.Note);
+    }
+
+    [Fact]
+    public async Task Embedded_cover_art_that_fails_the_cover_checks_is_skipped_with_a_note()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+
+        using var confirmed = await UploadAsync(manager, release, "tagged-wide-cover.mp3");
+
+        var confirmation = await confirmed.Content.ReadFromJsonAsync<TrackConfirmation>();
+        Assert.Contains("square", confirmation!.Note);
+        Assert.Equal(TrackStatus.Converting, confirmation.Track.Status);
+        Assert.Null((await ReadReleaseAsync(manager, release)).Cover);
+    }
+
+    [Fact]
+    public async Task Embedded_cover_art_never_replaces_a_cover_that_was_uploaded()
+    {
+        await app.SetClockAsync(DateTimeOffset.UtcNow);
+        using var manager = await app.LoginAsNewMemberAsync();
+        var release = await CreateDraftAsync(manager);
+        using var linkResponse = await manager.PostAsync($"/api/releases/{release.Id}/cover/upload-link", null);
+        var link = (await linkResponse.Content.ReadFromJsonAsync<UploadLink>())!;
+        await PutBlobAsync(link.Url, Square1000Png());
+        using var coverSet = await manager.PostAsJsonAsync(
+            $"/api/releases/{release.Id}/cover", new ConfirmUploadForm { UploadId = link.UploadId });
+        var uploaded = (await coverSet.Content.ReadFromJsonAsync<ReleaseDetails>())!.Cover!;
+
+        await UploadAsync(manager, release, "tagged-square-cover.mp3");
+
+        var kept = (await ReadReleaseAsync(manager, release)).Cover!;
+        Assert.Equal(uploaded.Large.AbsolutePath, kept.Large.AbsolutePath);
+    }
+
+    private static byte[] Square1000Png()
+    {
+        using var bitmap = new SKBitmap(1000, 1000);
+        using var png = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        return png.ToArray();
     }
 
     private static async Task<HttpResponseMessage> UploadAsync(HttpClient manager, ReleaseDetails release, string fixture)
