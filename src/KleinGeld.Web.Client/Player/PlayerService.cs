@@ -5,8 +5,15 @@ namespace KleinGeld.Web.Client.Player;
 /// </summary>
 public sealed class PlayerService
 {
+    private static readonly TimeSpan RestartAfter = TimeSpan.FromSeconds(3);
+
     private readonly IAudioElement _audio;
     private readonly IPlayLinkSource _links;
+
+    private List<PlayerTrack> _queue = [];
+
+    // Goes up with every press that starts a Track or shifts the Queue, so a play link that arrives late is dropped.
+    private int _attempt;
 
     public PlayerService(IAudioElement audio, IPlayLinkSource links)
     {
@@ -28,11 +35,18 @@ public sealed class PlayerService
             MediaAction.Seek => SeekAsync(command.Position),
             _ => Task.CompletedTask,
         };
+        _audio.Ended += NextAsync;
     }
 
     public event Action? Changed;
 
-    public PlayerTrack? Current { get; private set; }
+    /// <summary>The whole Queue: the Tracks already played, the current one and those still to come.</summary>
+    public IReadOnlyList<PlayerTrack> Queue => _queue;
+
+    /// <summary>Where <see cref="Current"/> is in the <see cref="Queue"/>, or -1 before anything has played.</summary>
+    public int CurrentIndex { get; private set; } = -1;
+
+    public PlayerTrack? Current => CurrentIndex >= 0 ? _queue[CurrentIndex] : null;
 
     public bool IsPlaying { get; private set; }
 
@@ -58,23 +72,77 @@ public sealed class PlayerService
         Changed?.Invoke();
     }
 
-    public async Task PlayAsync(PlayerTrack track)
+    /// <summary>Plays one Track on its own, replacing the Queue.</summary>
+    public Task PlayAsync(PlayerTrack track) => PlayAsync([track], 0);
+
+    /// <summary>
+    /// Replaces the whole Queue with <paramref name="source"/>, in its order and without its Unavailable Tracks, and
+    /// plays from the Track at <paramref name="start"/>.
+    /// </summary>
+    public Task PlayAsync(IReadOnlyList<PlayerTrack> source, int start)
     {
-        var link = await _links.ForTrackAsync(track.Id);
-        if (link is null)
+        if (!source[start].IsAvailable)
         {
-            Notice = $"{track.Title} can't be played right now.";
-            Changed?.Invoke();
+            Refuse(source[start]);
+            return Task.CompletedTask;
+        }
+
+        var queue = source.Where(track => track.IsAvailable).ToList();
+        return StartAsync(queue, source.Take(start).Count(track => track.IsAvailable));
+    }
+
+    /// <summary>Puts a Track right after the current one. With nothing playing, it starts.</summary>
+    public Task PlayNextAsync(PlayerTrack track)
+    {
+        if (!track.IsAvailable)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (Current is null)
+        {
+            return PlayAsync(track);
+        }
+
+        _attempt++;
+        _queue.Insert(CurrentIndex + 1, track);
+        Changed?.Invoke();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Puts a Track at the end of the Queue. With nothing playing, it starts.</summary>
+    public Task AddToQueueAsync(PlayerTrack track)
+    {
+        if (!track.IsAvailable)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (Current is null)
+        {
+            return PlayAsync(track);
+        }
+
+        _queue.Add(track);
+        Changed?.Invoke();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Takes the Track at <paramref name="index"/> out of the Queue. The current Track stays.</summary>
+    public void RemoveFromQueue(int index)
+    {
+        if (index == CurrentIndex)
+        {
             return;
         }
 
-        await _audio.ShowMetadataAsync(new MediaMetadata(track.Title, track.Artist, link.Cover));
-        await _audio.PlayAsync(link.Url.ToString());
-        Current = track;
-        Notice = null;
-        Position = TimeSpan.Zero;
-        Duration = TimeSpan.Zero;
-        IsPlaying = true;
+        _attempt++;
+        _queue.RemoveAt(index);
+        if (index < CurrentIndex)
+        {
+            CurrentIndex--;
+        }
+
         Changed?.Invoke();
     }
 
@@ -92,16 +160,79 @@ public sealed class PlayerService
         Changed?.Invoke();
     }
 
-    /// <summary>Moves on to the next Track in the Queue. There is no Queue yet, so there is nothing to move to.</summary>
-    public Task NextAsync() => Task.CompletedTask;
+    /// <summary>Moves on to the next Track, or stops on the last one.</summary>
+    public async Task NextAsync()
+    {
+        if (Current is null)
+        {
+            return;
+        }
 
-    /// <summary>Goes back in the Queue. There is no Queue yet, so there is nothing to go back to.</summary>
-    public Task PreviousAsync() => Task.CompletedTask;
+        if (CurrentIndex + 1 < _queue.Count)
+        {
+            await StartAsync(_queue, CurrentIndex + 1);
+        }
+        else
+        {
+            await PauseAsync();
+        }
+    }
+
+    /// <summary>Restarts the Track if it's more than 3 seconds in or the first in the Queue, otherwise goes back one.</summary>
+    public async Task PreviousAsync()
+    {
+        if (Current is null)
+        {
+            return;
+        }
+
+        if (Position > RestartAfter || CurrentIndex == 0)
+        {
+            await SeekAsync(TimeSpan.Zero);
+        }
+        else
+        {
+            await StartAsync(_queue, CurrentIndex - 1);
+        }
+    }
 
     public async Task SeekAsync(TimeSpan position)
     {
         await _audio.SeekAsync(position);
         Position = position;
+        Changed?.Invoke();
+    }
+
+    private async Task StartAsync(List<PlayerTrack> queue, int index)
+    {
+        var attempt = ++_attempt;
+        var track = queue[index];
+        var link = await _links.ForTrackAsync(track.Id);
+        if (attempt != _attempt)
+        {
+            return;
+        }
+
+        if (link is null)
+        {
+            Refuse(track);
+            return;
+        }
+
+        _queue = queue;
+        CurrentIndex = index;
+        Notice = null;
+        Position = TimeSpan.Zero;
+        Duration = TimeSpan.Zero;
+        IsPlaying = true;
+        await _audio.ShowMetadataAsync(new MediaMetadata(track.Title, track.Artist, link.Cover));
+        await _audio.PlayAsync(link.Url.ToString());
+        Changed?.Invoke();
+    }
+
+    private void Refuse(PlayerTrack track)
+    {
+        Notice = $"{track.Title} can't be played right now.";
         Changed?.Invoke();
     }
 }

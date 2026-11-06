@@ -59,10 +59,11 @@ else
     <ol class="release-tracks">
         @foreach (var track in _tracks)
         {
-            <li @key="track.Id">
+            @* The button has no handler of its own: its click reaches the row, which is what plays. *@
+            <li @key="track.Id" @onclick="() => PlayFromAsync(track)">
                 <span>@track.Position</span>
-                <button type="button" disabled="@(track.Status != TrackStatus.Ready)" aria-label="Play @track.Title"
-                        @onclick="() => Player.PlayAsync(new PlayerTrack(track.Id, track.Title, _release.ArtistName))">Play</button>
+                <button type="button" disabled="@(track.Status != TrackStatus.Ready)"
+                        aria-label="Play @track.Title">Play</button>
                 <span class="release-track-title">
                     @track.Title
                     @if (track.FeaturedArtists is not null)
@@ -72,6 +73,10 @@ else
                     <TrackBadges Track="track" />
                 </span>
                 <span>@track.Duration?.ToString(@"m\:ss")</span>
+                @if (track.Status == TrackStatus.Ready)
+                {
+                    <TrackMenu Track="ToPlayerTrack(track)" />
+                }
             </li>
         }
     </ol>
@@ -98,6 +103,12 @@ else
             return total.ToString(total.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
         }
     }
+
+    private Task PlayFromAsync(TrackSummary track) =>
+        Player.PlayAsync(_tracks.Select(ToPlayerTrack).ToList(), _tracks.IndexOf(track));
+
+    private PlayerTrack ToPlayerTrack(TrackSummary track) =>
+        new(track.Id, track.Title, _release!.ArtistName, track.Status == TrackStatus.Ready);
 
     private async Task ApproveAsync()
     {

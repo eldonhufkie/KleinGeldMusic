@@ -14,6 +14,9 @@ public interface IAudioElement
     /// <summary>Raised when a media key, headphone button or the lock screen asks for something.</summary>
     event Func<MediaCommand, Task>? MediaCommanded;
 
+    /// <summary>Raised when a Track plays to its end by itself.</summary>
+    event Func<Task>? Ended;
+
     Task PlayAsync(string source);
 
     Task PauseAsync();

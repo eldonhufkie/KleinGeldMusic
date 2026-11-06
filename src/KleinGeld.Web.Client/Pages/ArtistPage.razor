@@ -78,10 +78,13 @@ else
         try
         {
             var tracks = await Http.GetFromJsonAsync<List<TrackSummary>>($"api/tracks?releaseId={_artist!.Newest!.Id}");
-            var first = tracks!.FirstOrDefault(t => t.Status == TrackStatus.Ready);
-            if (first is not null)
+            var release = tracks!
+                .Select(t => new PlayerTrack(t.Id, t.Title, _artist.Name, t.Status == TrackStatus.Ready))
+                .ToList();
+            var first = release.FindIndex(t => t.IsAvailable);
+            if (first >= 0)
             {
-                await Player.PlayAsync(new PlayerTrack(first.Id, first.Title, _artist.Name));
+                await Player.PlayAsync(release, first);
             }
         }
         catch (HttpRequestException)
