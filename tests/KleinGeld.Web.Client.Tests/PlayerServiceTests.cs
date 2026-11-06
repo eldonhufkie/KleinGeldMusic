@@ -1,10 +1,11 @@
+using KleinGeld.Contracts;
 using KleinGeld.Web.Client.Player;
 
 namespace KleinGeld.Web.Client.Tests;
 
 public sealed class PlayerServiceTests
 {
-    private static readonly PlayerTrack Track = new(Guid.CreateVersion7(), "Kapél");
+    private static readonly PlayerTrack Track = new(Guid.CreateVersion7(), "Kapél", "De Kleingeld");
     private static readonly Uri Link = new("https://blobs.example/track.m4a?sig=abc");
 
     private readonly FakeAudioElement _audio = new();
@@ -89,7 +90,7 @@ public sealed class PlayerServiceTests
     [Fact]
     public async Task A_refused_play_link_leaves_the_player_as_it_was_with_a_notice()
     {
-        var refused = new PlayerTrack(Guid.CreateVersion7(), "Weg");
+        var refused = new PlayerTrack(Guid.CreateVersion7(), "Weg", "De Kleingeld");
         await _player.PlayAsync(Track);
 
         await _player.PlayAsync(refused);
@@ -102,17 +103,84 @@ public sealed class PlayerServiceTests
         Assert.Null(_player.Notice);
     }
 
+    [Fact]
+    public async Task Every_Track_change_shows_its_title_Artist_and_cover_on_the_lock_screen()
+    {
+        var cover = new CoverArt(new Uri("https://blobs.example/300.jpg"), new Uri("https://blobs.example/1000.jpg"));
+        var next = new PlayerTrack(Guid.CreateVersion7(), "Weg", "Oom Piet");
+        _links.Add(next.Id, Link, cover);
+
+        await _player.PlayAsync(Track);
+        await _player.PlayAsync(next);
+
+        Assert.Equal(
+            [new MediaMetadata("Kapél", "De Kleingeld", null), new MediaMetadata("Weg", "Oom Piet", cover)],
+            _audio.Metadata);
+    }
+
+    [Fact]
+    public async Task A_refused_play_link_leaves_the_lock_screen_on_the_playing_Track()
+    {
+        await _player.PlayAsync(Track);
+
+        await _player.PlayAsync(new PlayerTrack(Guid.CreateVersion7(), "Weg", "Oom Piet"));
+
+        Assert.Equal([new MediaMetadata("Kapél", "De Kleingeld", null)], _audio.Metadata);
+    }
+
+    [Fact]
+    public async Task The_media_keys_pause_and_resume_the_Track()
+    {
+        await _player.PlayAsync(Track);
+
+        await _audio.PressAsync(new MediaCommand(MediaAction.Pause));
+        Assert.True(_audio.IsPaused);
+        Assert.False(_player.IsPlaying);
+
+        await _audio.PressAsync(new MediaCommand(MediaAction.Play));
+        Assert.False(_audio.IsPaused);
+        Assert.True(_player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task Seeking_from_the_lock_screen_moves_the_audio()
+    {
+        await _player.PlayAsync(Track);
+
+        await _audio.PressAsync(new MediaCommand(MediaAction.Seek, TimeSpan.FromSeconds(42)));
+
+        Assert.Equal(TimeSpan.FromSeconds(42), _audio.SoughtTo);
+        Assert.Equal(TimeSpan.FromSeconds(42), _player.Position);
+    }
+
+    [Theory]
+    [InlineData(MediaAction.Next)]
+    [InlineData(MediaAction.Previous)]
+    public async Task Next_and_Previous_leave_the_Track_playing_while_there_is_no_Queue(MediaAction action)
+    {
+        await _player.PlayAsync(Track);
+
+        await _audio.PressAsync(new MediaCommand(action));
+
+        Assert.Equal(Track, _player.Current);
+        Assert.True(_player.IsPlaying);
+        Assert.Equal(Link.ToString(), _audio.PlayingSource);
+    }
+
     private sealed class FakePlayLinks : IPlayLinkSource
     {
-        private readonly Dictionary<Guid, Uri> _links = [];
+        private readonly Dictionary<Guid, PlayLink> _links = [];
 
-        public void Add(Guid trackId, Uri link) => _links[trackId] = link;
+        public void Add(Guid trackId, Uri link, CoverArt? cover = null) =>
+            _links[trackId] = new PlayLink(link, DateTimeOffset.UtcNow.AddMinutes(10), cover);
 
-        public Task<Uri?> ForTrackAsync(Guid trackId) => Task.FromResult(_links.GetValueOrDefault(trackId));
+        public Task<PlayLink?> ForTrackAsync(Guid trackId) => Task.FromResult(_links.GetValueOrDefault(trackId));
     }
 
     private sealed class FakeAudioElement : IAudioElement
     {
+        public List<MediaMetadata> Metadata { get; } = [];
+
         public string? PlayingSource { get; private set; }
 
         public bool IsPaused { get; private set; }
@@ -142,9 +210,19 @@ public sealed class PlayerServiceTests
             return Task.CompletedTask;
         }
 
+        public Task ShowMetadataAsync(MediaMetadata metadata)
+        {
+            Metadata.Add(metadata);
+            return Task.CompletedTask;
+        }
+
         public TimeSpan? SoughtTo { get; private set; }
 
         public event Action<AudioProgress>? Progressed;
+
+        public event Func<MediaCommand, Task>? MediaCommanded;
+
+        public Task PressAsync(MediaCommand command) => MediaCommanded!.Invoke(command);
 
         public void Report(AudioProgress progress) => Progressed?.Invoke(progress);
     }
