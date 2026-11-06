@@ -45,15 +45,22 @@ internal static class ArtistEndpoints
             return Results.Ok(new ArtistSummary(artist.Id, artist.Name, artist.Slug));
         });
 
-        // The grid is a listener's view, so it's the same for managers and the Admin. Sorted on the slug, which is
-        // already lower-cased and free of accents, so A–Z doesn't depend on the database's collation.
-        api.MapGet("/artists", async (int? skip, KleinGeldDbContext db, CoverStore covers) =>
+        // The grid is a Member's view, so it's the same for managers and the Admin. Sorted on the slug, which is
+        // already lower-cased and free of accents, so A–Z doesn't depend on the database's collation. The id settles
+        // ties, so that a position is exact and nothing is skipped or repeated between pages.
+        api.MapGet("/artists", async (string? after, KleinGeldDbContext db, CoverStore covers) =>
         {
+            var position = after is null ? null : PagingPosition.Parse<ArtistPosition>(after);
+            if (after is not null && position is not { Slug: not null } || position?.Id == Guid.Empty)
+            {
+                return Results.BadRequest();
+            }
+
             var artists = await db.Artists
                 .WithPublishedRelease()
+                .After(position)
                 .OrderBy(a => a.Slug)
                 .ThenBy(a => a.Id)
-                .Skip(Math.Max(skip ?? 0, 0))
                 .Take(LoadSize + 1)
                 .Select(a => new
                 {
@@ -77,10 +84,11 @@ internal static class ArtistEndpoints
                     a.Slug,
                     a.Newest.CoverId is { } coverId ? covers.LinksTo(a.Newest.Id, coverId) : null))
                 .ToList();
-            return new ArtistList(cards, artists.Count > LoadSize);
+            var next = artists.Count > LoadSize ? PagingPosition.Format(new ArtistPosition(cards[^1].Id, cards[^1].Slug)) : null;
+            return Results.Ok(new ArtistList(cards, next));
         });
 
-        // Managers and the Admin may open an Artist nobody else can see yet, but what they find is what a listener
+        // Managers and the Admin may open an Artist nobody else can see yet, but what they find is what any Member
         // would: only Published Releases. Their other Releases are on the My Artists page.
         api.MapGet("/artists/{id:guid}/{slug?}", async (Guid id, string? slug, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers) =>
         {
@@ -146,7 +154,7 @@ internal static class ArtistEndpoints
                     Releases = a.Releases
                         .OrderByDescending(r => r.ReleaseDate)
                         .ThenByDescending(r => r.Id)
-                        .Select(r => new ManagedRelease(r.Id, r.Title, r.Slug, r.Type, r.ReleaseDate, r.Stage, r.RejectionReason))
+                        .Select(r => new ManagedRelease(r.Id, r.Title, r.Slug, r.Type, r.ReleaseDate, r.Stage, r.Stage == ReleaseStage.Rejected ? r.RejectionReason : null))
                         .ToList(),
                 })
                 .SingleOrDefaultAsync();
@@ -275,6 +283,13 @@ internal static class ArtistEndpoints
             .OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    private static IQueryable<Artist> After(this IQueryable<Artist> artists, ArtistPosition? position) =>
+        position is null
+            ? artists
+            : artists.Where(a => EF.Functions.GreaterThan(ValueTuple.Create(a.Slug, a.Id), ValueTuple.Create(position.Slug, position.Id)));
+
+    private sealed record ArtistPosition(Guid Id, string Slug);
 
     public static IQueryable<Artist> ManagedBy(this IQueryable<Artist> artists, Guid memberId) =>
         artists.Where(a => a.Managers.Any(m => m.Id == memberId));

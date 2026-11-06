@@ -40,12 +40,12 @@
                     @onclick="() => Player.SetShuffle(!Player.Shuffle)">Shuffle</button>
             <button type="button" class="player-step" @onclick="NextRepeat">Repeat: @Player.Repeat.ToString().ToLowerInvariant()</button>
             <button type="button" class="player-step" aria-expanded="@(_queueOpen ? "true" : "false")"
-                    @onclick="() => _queueOpen = !_queueOpen">Up next</button>
+                    @onclick="() => _queueOpen = !_queueOpen">Queue</button>
             @if (_queueOpen)
             {
                 @* By index, not by id: the same Track can be in the Queue twice. *@
                 var queue = Player.Queue;
-                <ol class="queue-panel" aria-label="Up next">
+                <ol class="queue-panel" aria-label="Queue">
                     @for (var i = 0; i < queue.Count; i++)
                     {
                         var index = i;

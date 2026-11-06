@@ -4,7 +4,7 @@
 @inject NavigationManager Navigation
 @inject PlayerService Player
 
-@* The public Artist page: a listener's view for everyone, managers too. They manage it from My Artists. *@
+@* The public Artist page: what every Member sees, managers too. They manage it from My Artists. *@
 
 <PageTitle>@(_artist?.Name ?? "Artist") · KleinGeld Music</PageTitle>
 
@@ -79,7 +79,7 @@ else
         {
             var tracks = await Http.GetFromJsonAsync<List<TrackSummary>>($"api/tracks?releaseId={_artist!.Newest!.Id}");
             var release = tracks!
-                .Select(t => new PlayerTrack(t.Id, t.Title, _artist.Name, t.Status == TrackStatus.Ready))
+                .Select(t => PlayerTrack.From(t, _artist.Name))
                 .ToList();
             var first = release.FindIndex(t => t.IsAvailable);
             if (first >= 0)

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KleinGeld.Contracts;
 
 namespace KleinGeld.Web.Client.Player;
 
@@ -19,8 +20,12 @@ public sealed class PlayerService
 
     private List<QueueEntry> _queue = [];
 
-    // Goes up with every press that starts a Track or shifts the Queue, so a play link that arrives late is dropped.
+    // Goes up with every press that starts a Track, so the play link of an earlier press that arrives late is dropped.
     private int _attempt;
+
+    // The Track whose play link is on its way, and the Queue it starts: _queue, or the one that will replace it. Queue
+    // changes meanwhile must not stop it, and belong around this Track rather than the one still playing.
+    private Start? _starting;
 
     private TimeSpan _savedPosition;
 
@@ -100,13 +105,25 @@ public sealed class PlayerService
             return;
         }
 
-        _attempt++;
         Shuffle = shuffle;
-        var places = Enumerable.Range(CurrentIndex + 1, _queue.Count - CurrentIndex - 1)
-            .Where(place => _queue[place].SourceOrder is not null)
+        foreach (var queue in QueuesInPlay)
+        {
+            // Never back past the current Track: during Previous, the one being fetched comes before it.
+            var last = queue == _queue ? Math.Max(LastPlayed(queue), CurrentIndex) : LastPlayed(queue);
+            Reorder(queue, last + 1);
+        }
+
+        Save();
+        Changed?.Invoke();
+    }
+
+    private void Reorder(List<QueueEntry> queue, int from)
+    {
+        var places = Enumerable.Range(from, queue.Count - from)
+            .Where(place => queue[place].SourceOrder is not null)
             .ToList();
-        var upcoming = places.Select(place => _queue[place]).ToArray();
-        if (shuffle)
+        var upcoming = places.Select(place => queue[place]).ToArray();
+        if (Shuffle)
         {
             _shuffler.Shuffle(upcoming);
         }
@@ -117,11 +134,8 @@ public sealed class PlayerService
 
         foreach (var (place, entry) in places.Zip(upcoming))
         {
-            _queue[place] = entry;
+            queue[place] = entry;
         }
-
-        Save();
-        Changed?.Invoke();
     }
 
     public void SetRepeat(RepeatMode repeat)
@@ -180,13 +194,22 @@ public sealed class PlayerService
             return Task.CompletedTask;
         }
 
-        if (Current is null)
+        if (Current is null && _starting is null)
         {
             return PlayAsync(track);
         }
 
-        _attempt++;
-        _queue.Insert(CurrentIndex + 1, new QueueEntry(track, SourceOrder: null));
+        var entry = new QueueEntry(track, SourceOrder: null);
+        foreach (var queue in QueuesInPlay)
+        {
+            var place = LastPlayed(queue) + 1;
+            queue.Insert(place, entry);
+            if (queue == _queue && place <= CurrentIndex)
+            {
+                CurrentIndex++;
+            }
+        }
+
         Save();
         Changed?.Invoke();
         return Task.CompletedTask;
@@ -200,12 +223,17 @@ public sealed class PlayerService
             return Task.CompletedTask;
         }
 
-        if (Current is null)
+        if (Current is null && _starting is null)
         {
             return PlayAsync(track);
         }
 
-        _queue.Add(new QueueEntry(track, SourceOrder: null));
+        var entry = new QueueEntry(track, SourceOrder: null);
+        foreach (var queue in QueuesInPlay)
+        {
+            queue.Add(entry);
+        }
+
         Save();
         Changed?.Invoke();
         return Task.CompletedTask;
@@ -219,7 +247,6 @@ public sealed class PlayerService
             return;
         }
 
-        _attempt++;
         _queue.RemoveAt(index);
         if (index < CurrentIndex)
         {
@@ -360,10 +387,23 @@ public sealed class PlayerService
     private async Task StartAsync(List<QueueEntry> queue, int index)
     {
         var attempt = ++_attempt;
-        var track = queue[index].Track;
-        var link = await _links.ForTrackAsync(track.Id);
+        var entry = queue[index];
+        var track = entry.Track;
+        _starting = new Start(queue, entry);
+        var link = await LinkOrNothingAsync(track.Id);
         if (attempt != _attempt)
         {
+            return;
+        }
+
+        _starting = null;
+
+        // By reference, and looked up again: the Queue may have changed, and the same Track can be in it twice.
+        var place = queue.FindIndex(candidate => ReferenceEquals(candidate, entry));
+        if (place < 0)
+        {
+            // The Member removed it from the Queue while its link was on the way.
+            await NextAsync();
             return;
         }
 
@@ -374,7 +414,7 @@ public sealed class PlayerService
         }
 
         _queue = queue;
-        CurrentIndex = index;
+        CurrentIndex = place;
         _awaitingFirstPlay = false;
         Notice = null;
         Position = TimeSpan.Zero;
@@ -386,11 +426,27 @@ public sealed class PlayerService
         Changed?.Invoke();
     }
 
+    // The Queues a change must reach: the one a start is about to put in place, and the one that stays if it's refused.
+    private IEnumerable<List<QueueEntry>> QueuesInPlay =>
+        _starting is { } starting && starting.Queue != _queue
+            ? Current is null ? [starting.Queue] : [starting.Queue, _queue]
+            : [_queue];
+
+    // Where the Tracks still to come begin, less one: after the Track being started, or else the current one.
+    private int LastPlayed(List<QueueEntry> queue)
+    {
+        var starting = _starting is { } start && start.Queue == queue
+            ? queue.FindIndex(candidate => ReferenceEquals(candidate, start.Entry))
+            : -1;
+        return starting >= 0 ? starting : CurrentIndex;
+    }
+
     private async Task PlayRestoredAsync()
     {
         var attempt = ++_attempt;
+        _starting = null;
         var track = Current!;
-        var link = await _links.ForTrackAsync(track.Id);
+        var link = await LinkOrNothingAsync(track.Id);
         if (attempt != _attempt)
         {
             return;
@@ -436,8 +492,33 @@ public sealed class PlayerService
     private async Task<HashSet<Guid>> AvailableAsync(List<QueueEntry> queue)
     {
         var ids = queue.Where(entry => entry.Track.IsAvailable).Select(entry => entry.Track.Id).Distinct().ToList();
-        var links = await Task.WhenAll(ids.Select(_links.ForTrackAsync));
-        return ids.Where((_, index) => links[index] is not null).ToHashSet();
+        var kept = await Task.WhenAll(ids.Select(IsNotRefusedAsync));
+        return ids.Where((_, index) => kept[index]).ToHashSet();
+    }
+
+    // Only a refusal drops a Track: a bad moment for the server must not cost the Member their Queue.
+    private async Task<bool> IsNotRefusedAsync(Guid trackId)
+    {
+        try
+        {
+            return await _links.ForTrackAsync(trackId) is not null;
+        }
+        catch (PlayLinkFailedException)
+        {
+            return true;
+        }
+    }
+
+    private async Task<PlayLink?> LinkOrNothingAsync(Guid trackId)
+    {
+        try
+        {
+            return await _links.ForTrackAsync(trackId);
+        }
+        catch (PlayLinkFailedException)
+        {
+            return null;
+        }
     }
 
     private void Save() => _ = SaveAsync();
@@ -461,4 +542,6 @@ public sealed class PlayerService
         Notice = $"{track.Title} can't be played right now.";
         Changed?.Invoke();
     }
+
+    private sealed record Start(List<QueueEntry> Queue, QueueEntry Entry);
 }

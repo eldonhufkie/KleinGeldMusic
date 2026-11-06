@@ -52,7 +52,6 @@ internal static class SubmissionEndpoints
                     WordingVersion = RightsDeclarationWording.Version,
                 });
                 release.Stage = ReleaseStage.Submitted;
-                release.RejectionReason = null;
                 await db.SaveChangesAsync();
                 submitted = release;
                 return null;

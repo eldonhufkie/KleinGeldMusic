@@ -239,6 +239,59 @@ public sealed class RejectReleaseTests(KleinGeldApp app) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Resubmitting_keeps_the_latest_reason_stored_without_showing_it()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreateSubmittedReleaseAsync(manager);
+        using var rejected = await RejectAsync(admin, release, "Opnieuw graag.");
+
+        using var resubmitted = await SubmitAsync(manager, release);
+
+        Assert.Equal("Opnieuw graag.", await app.ReadStoredRejectionReasonAsync(release.Id));
+        Assert.Null((await ReadAsync(manager, release)).RejectionReason);
+        Assert.Null((await ReadOnMyArtistsAsync(manager, release)).RejectionReason);
+    }
+
+    [Fact]
+    public async Task A_stored_reason_stays_hidden_after_Withdrawing_and_approval()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreateSubmittedReleaseAsync(manager);
+        using var rejected = await RejectAsync(admin, release, "Nog een keer.");
+        using var resubmitted = await SubmitAsync(manager, release);
+
+        using var withdrawn = await manager.PostAsync($"/api/releases/{release.Id}/withdraw", null);
+
+        Assert.Equal(ReleaseStage.Draft, (await ReadAsync(manager, release)).Stage);
+        Assert.Null((await ReadAsync(manager, release)).RejectionReason);
+        Assert.Null((await ReadOnMyArtistsAsync(manager, release)).RejectionReason);
+
+        using var again = await SubmitAsync(manager, release);
+        using var approved = await admin.PostAsync($"/api/admin/review/releases/{release.Id}/approve", null);
+
+        Assert.Equal(ReleaseStage.Published, (await ReadAsync(manager, release)).Stage);
+        Assert.Null((await ReadAsync(manager, release)).RejectionReason);
+        Assert.Null((await ReadOnMyArtistsAsync(manager, release)).RejectionReason);
+    }
+
+    [Fact]
+    public async Task A_new_rejection_shows_its_own_reason_and_replaces_the_stored_one()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreateSubmittedReleaseAsync(manager);
+        using var first = await RejectAsync(admin, release, "De eerste reden.");
+        using var resubmitted = await SubmitAsync(manager, release);
+
+        using var second = await RejectAsync(admin, release, "De tweede reden.");
+
+        Assert.Equal("De tweede reden.", (await ReadAsync(manager, release)).RejectionReason);
+        Assert.Equal("De tweede reden.", await app.ReadStoredRejectionReasonAsync(release.Id));
+    }
+
+    [Fact]
     public async Task A_Rejected_Release_leaves_the_Review_page()
     {
         using var manager = await app.LoginAsNewMemberAsync();

@@ -44,7 +44,7 @@ else if (!_failed)
 
 @if (_next is not null)
 {
-    <button type="button" disabled="@_loading" @onclick="LoadMoreAsync">@(_loading ? "Loading…" : "Load more")</button>
+    <button type="button" disabled="@_loading" @onclick="LoadAsync">@(_loading ? "Loading…" : "Load more")</button>
 }
 
 @code {
@@ -87,8 +87,6 @@ else if (!_failed)
         _next = null;
         return LoadAsync();
     }
-
-    private Task LoadMoreAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
