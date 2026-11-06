@@ -4,29 +4,148 @@ namespace KleinGeld.Web.Client.Tests;
 
 public sealed class PlayerServiceTests
 {
-    [Fact]
-    public async Task Playing_a_Track_starts_its_audio_and_reports_playing()
+    private static readonly PlayerTrack Track = new(Guid.CreateVersion7(), "Kapél");
+    private static readonly Uri Link = new("https://blobs.example/track.m4a?sig=abc");
+
+    private readonly FakeAudioElement _audio = new();
+    private readonly FakePlayLinks _links = new();
+    private readonly PlayerService _player;
+
+    public PlayerServiceTests()
     {
-        var audio = new FakeAudioElement();
-        var player = new PlayerService(audio);
+        _links.Add(Track.Id, Link);
+        _player = new PlayerService(_audio, _links);
+    }
+
+    [Fact]
+    public async Task Playing_a_Track_starts_it_from_a_fresh_play_link_and_reports_playing()
+    {
         var changes = 0;
-        player.Changed += () => changes++;
+        _player.Changed += () => changes++;
 
-        await player.PlayAsync("https://blobs.example/track.m4a");
+        await _player.PlayAsync(Track);
 
-        Assert.Equal("https://blobs.example/track.m4a", audio.PlayingSource);
-        Assert.True(player.IsPlaying);
+        Assert.Equal(Link.ToString(), _audio.PlayingSource);
+        Assert.Equal(Track, _player.Current);
+        Assert.True(_player.IsPlaying);
         Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public async Task Pausing_pauses_the_audio_and_keeps_the_Track()
+    {
+        await _player.PlayAsync(Track);
+        var changes = 0;
+        _player.Changed += () => changes++;
+
+        await _player.PauseAsync();
+
+        Assert.True(_audio.IsPaused);
+        Assert.False(_player.IsPlaying);
+        Assert.Equal(Track, _player.Current);
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public async Task Resuming_carries_on_from_the_same_audio_without_a_new_link()
+    {
+        await _player.PlayAsync(Track);
+        await _player.PauseAsync();
+        _links.Add(Track.Id, new Uri("https://blobs.example/other"));
+
+        await _player.ResumeAsync();
+
+        Assert.False(_audio.IsPaused);
+        Assert.Equal(Link.ToString(), _audio.PlayingSource);
+        Assert.True(_player.IsPlaying);
+    }
+
+    [Fact]
+    public async Task Seeking_moves_the_audio_and_the_reported_position()
+    {
+        await _player.PlayAsync(Track);
+
+        await _player.SeekAsync(TimeSpan.FromSeconds(42));
+
+        Assert.Equal(TimeSpan.FromSeconds(42), _audio.SoughtTo);
+        Assert.Equal(TimeSpan.FromSeconds(42), _player.Position);
+    }
+
+    [Fact]
+    public async Task The_audio_reports_its_progress_and_when_it_stops()
+    {
+        await _player.PlayAsync(Track);
+        var changes = 0;
+        _player.Changed += () => changes++;
+
+        _audio.Report(new AudioProgress(TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(180), IsPlaying: false));
+
+        Assert.Equal(TimeSpan.FromSeconds(3), _player.Position);
+        Assert.Equal(TimeSpan.FromSeconds(180), _player.Duration);
+        Assert.False(_player.IsPlaying);
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public async Task A_refused_play_link_leaves_the_player_as_it_was_with_a_notice()
+    {
+        var refused = new PlayerTrack(Guid.CreateVersion7(), "Weg");
+        await _player.PlayAsync(Track);
+
+        await _player.PlayAsync(refused);
+
+        Assert.Equal(Track, _player.Current);
+        Assert.Equal(Link.ToString(), _audio.PlayingSource);
+        Assert.Equal("Weg can't be played right now.", _player.Notice);
+
+        await _player.PlayAsync(Track);
+        Assert.Null(_player.Notice);
+    }
+
+    private sealed class FakePlayLinks : IPlayLinkSource
+    {
+        private readonly Dictionary<Guid, Uri> _links = [];
+
+        public void Add(Guid trackId, Uri link) => _links[trackId] = link;
+
+        public Task<Uri?> ForTrackAsync(Guid trackId) => Task.FromResult(_links.GetValueOrDefault(trackId));
     }
 
     private sealed class FakeAudioElement : IAudioElement
     {
         public string? PlayingSource { get; private set; }
 
+        public bool IsPaused { get; private set; }
+
         public Task PlayAsync(string source)
         {
             PlayingSource = source;
+            IsPaused = false;
             return Task.CompletedTask;
         }
+
+        public Task PauseAsync()
+        {
+            IsPaused = true;
+            return Task.CompletedTask;
+        }
+
+        public Task ResumeAsync()
+        {
+            IsPaused = false;
+            return Task.CompletedTask;
+        }
+
+        public Task SeekAsync(TimeSpan position)
+        {
+            SoughtTo = position;
+            return Task.CompletedTask;
+        }
+
+        public TimeSpan? SoughtTo { get; private set; }
+
+        public event Action<AudioProgress>? Progressed;
+
+        public void Report(AudioProgress progress) => Progressed?.Invoke(progress);
     }
 }
