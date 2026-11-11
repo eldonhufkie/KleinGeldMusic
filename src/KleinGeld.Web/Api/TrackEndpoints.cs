@@ -31,10 +31,13 @@ internal static class TrackEndpoints
             return Results.Ok(release.Tracks
                 .Where(t => seesPending || !t.Pending)
                 .OrderBy(t => t.Position)
-                .Select(ToSummary));
+                .Select(t => ToSummary(t, seesPending)));
         });
 
-        api.MapGet("/tracks/{id:guid}/play-link", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, PlayLinks links, CoverStore covers) =>
+        // Those who see Pending Changes hear a replaced Track's new audio, or its live audio with old=true; Members
+        // always hear the live audio.
+        api.MapGet("/tracks/{id:guid}/play-link", async (
+            Guid id, bool? old, ClaimsPrincipal caller, KleinGeldDbContext db, PlayLinks links, CoverStore covers) =>
         {
             // The access rule is the visibility rule: whoever may see a Track's Release may play the Track.
             // Pending Changes aren't part of the Release yet, so only those who see them may play their Tracks.
@@ -49,12 +52,15 @@ internal static class TrackEndpoints
                 return Results.NotFound();
             }
 
-            if (found.Track.Status != TrackStatus.Ready)
+            var track = found.Track;
+            var live = track.IsReplaced
+                && (old == true || !await db.Releases.Where(r => r.Id == found.ReleaseId).SeesPendingChanges(caller).AnyAsync());
+            if (!live && track.Status != TrackStatus.Ready)
             {
                 return Results.Problem("This Track isn't ready to play yet.", statusCode: StatusCodes.Status409Conflict);
             }
 
-            var link = await links.ForAsync(found.Track.ConvertedBlobName!);
+            var link = await links.ForAsync(live ? track.LiveConvertedBlobName! : track.ConvertedBlobName!);
             return Results.Ok(link with
             {
                 Cover = found.CoverId is { } coverId ? covers.LinksTo(found.ReleaseId, coverId) : null,
@@ -64,7 +70,7 @@ internal static class TrackEndpoints
         api.MapPost("/releases/{id:guid}/tracks", async (Guid id, TrackUploadForm form, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links) =>
         {
             Track? added = null;
-            var refused = await WithReleaseLockedAsync(db, id, caller, adding: true, async release =>
+            var refused = await WithReleaseLockedAsync(db, id, caller, startsPendingChange: true, async release =>
             {
                 if (release.Tracks.Count >= TrackUploadForm.MaxTracksPerRelease)
                 {
@@ -191,19 +197,37 @@ internal static class TrackEndpoints
         {
             Track? replaced = null;
             List<string> oldBlobNames = [];
-            var refused = await WithReleaseLockedAsync(db, id, caller, trackId, async release =>
+            var refused = await WithReleaseLockedAsync(db, id, caller, startsPendingChange: true, async release =>
             {
                 var track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
                 if (track is null)
                 {
                     return Results.NotFound();
                 }
-                if (track.Status != TrackStatus.Failed)
+
+                // On a Published Release, a Track of its own gets new audio as a Pending Change: Members keep hearing
+                // the live audio until it is approved.
+                var replacingLive = release.Stage == ReleaseStage.Published && !track.Pending;
+                if (replacingLive && track.PendingRemoval)
                 {
-                    return Results.Problem("Only a Failed Track's audio can be replaced.", statusCode: StatusCodes.Status409Conflict);
+                    return Results.Problem("A removed Track's audio can't be replaced.", statusCode: StatusCodes.Status409Conflict);
+                }
+                if (replacingLive ? track.Status is TrackStatus.Uploading or TrackStatus.Converting : track.Status != TrackStatus.Failed)
+                {
+                    return Results.Problem(
+                        replacingLive ? "Wait until the Track's new audio is Ready or Failed." : "Only a Failed Track's audio can be replaced.",
+                        statusCode: StatusCodes.Status409Conflict);
                 }
 
-                oldBlobNames = track.BlobNames().ToList();
+                if (replacingLive && !track.IsReplaced)
+                {
+                    track.KeepLiveAudio();
+                    release.PendingChanges ??= ReleaseStage.Draft;
+                }
+                else
+                {
+                    oldBlobNames = new[] { track.OriginalBlobName, track.ConvertedBlobName }.OfType<string>().ToList();
+                }
                 track.OriginalBlobName = $"tracks/{trackId}/{Guid.CreateVersion7()}";
                 track.ConvertedBlobName = null;
                 track.Duration = null;
@@ -286,12 +310,27 @@ internal static class TrackEndpoints
     private static async Task<IResult> RemoveAsync(KleinGeldDbContext db, BlobLinks links, Guid id, Guid trackId, ClaimsPrincipal caller)
     {
         List<string> blobNames = [];
-        var refused = await WithReleaseLockedAsync(db, id, caller, trackId, async release =>
+        var refused = await WithReleaseLockedAsync(db, id, caller, startsPendingChange: true, async release =>
         {
             var track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
             if (track is null)
             {
                 return Results.NotFound();
+            }
+
+            // A Published Release's own Track only goes once its Pending Changes are approved; any new audio it was
+            // waiting on goes now.
+            if (release.Stage == ReleaseStage.Published && !track.Pending)
+            {
+                if (track.IsReplaced)
+                {
+                    blobNames = new[] { track.OriginalBlobName, track.ConvertedBlobName }.OfType<string>().ToList();
+                    track.RestoreLiveAudio();
+                }
+                track.PendingRemoval = true;
+                release.PendingChanges ??= ReleaseStage.Draft;
+                await db.SaveChangesAsync();
+                return null;
             }
 
             blobNames = track.BlobNames().ToList();
@@ -300,7 +339,7 @@ internal static class TrackEndpoints
             {
                 later.Position--;
             }
-            if (release.Tracks.All(t => t == track || !t.Pending))
+            if (release.Tracks.All(t => t == track || !t.IsPendingChange))
             {
                 release.PendingChanges = null;
             }
@@ -322,16 +361,16 @@ internal static class TrackEndpoints
     /// <summary>
     /// Changes a Release's Track list while holding a lock on the Release, so concurrent uploads can't get past the
     /// Track limit or share a Track number. Answers "not found" to anyone who doesn't manage the Artist, and refuses
-    /// a Release that can't be edited. A Published Release takes new Tracks, and changes to them, as its Pending
-    /// Changes while those aren't Submitted; its own Tracks stay as they are. <paramref name="change"/> returns null
-    /// when it succeeded.
+    /// a Release that can't be edited. A Published Release takes added, removed and replaced Tracks, and changes to
+    /// those, as its Pending Changes while they aren't Submitted; nothing else about its own Tracks changes here.
+    /// <paramref name="change"/> returns null when it succeeded.
     /// </summary>
     private static Task<IResult?> WithReleaseLockedAsync(
         KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, Guid? trackId, Func<Release, Task<IResult?>> change) =>
-        WithReleaseLockedAsync(db, id, caller, adding: false, change, trackId);
+        WithReleaseLockedAsync(db, id, caller, startsPendingChange: false, change, trackId);
 
     private static Task<IResult?> WithReleaseLockedAsync(
-        KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, bool adding, Func<Release, Task<IResult?>> change, Guid? trackId = null) =>
+        KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, bool startsPendingChange, Func<Release, Task<IResult?>> change, Guid? trackId = null) =>
         db.WithManagedReleaseLockedAsync(id, caller, release =>
         {
             if (release.Stage is ReleaseStage.Draft or ReleaseStage.Rejected)
@@ -346,10 +385,10 @@ internal static class TrackEndpoints
             {
                 return Refuse("Submitted Pending Changes can't be changed. Withdraw them first.");
             }
-            var changesPendingTrack = trackId is { } changed && release.Tracks.Any(t => t.Id == changed && t.Pending);
-            return adding || changesPendingTrack
+            var changesPendingTrack = trackId is { } changed && release.Tracks.Any(t => t.Id == changed && (t.Pending || t.IsReplaced));
+            return startsPendingChange || changesPendingTrack
                 ? change(release)
-                : Refuse("A Published Release's own Tracks can't be changed, only the Tracks added in its Pending Changes.");
+                : Refuse("A Published Release's own Tracks can only be added, removed or replaced, as Pending Changes.");
         });
 
     private static Task<IResult?> Refuse(string problem) =>
@@ -373,6 +412,13 @@ internal static class TrackEndpoints
         return title.Length > ReleaseForm.TitleMaxLength ? title[..ReleaseForm.TitleMaxLength] : title;
     }
 
-    internal static TrackSummary ToSummary(Track track) =>
-        new(track.Id, track.Title, track.Position, track.Status, track.SingleMark, track.FeaturedArtists, track.Explicit, track.Duration, track.Pending);
+    internal static TrackSummary ToSummary(Track track) => ToSummary(track, seesPendingChanges: true);
+
+    /// <summary>A Member who doesn't see Pending Changes sees a replaced Track as its live audio, and nothing removed.</summary>
+    internal static TrackSummary ToSummary(Track track, bool seesPendingChanges) =>
+        seesPendingChanges || !track.IsReplaced
+            ? new(track.Id, track.Title, track.Position, track.Status, track.SingleMark, track.FeaturedArtists, track.Explicit,
+                track.Duration, track.Pending, Removed: seesPendingChanges && track.PendingRemoval, Replaced: seesPendingChanges && track.IsReplaced)
+            : new(track.Id, track.Title, track.Position, TrackStatus.Ready, track.SingleMark, track.FeaturedArtists, track.Explicit,
+                track.LiveDuration);
 }

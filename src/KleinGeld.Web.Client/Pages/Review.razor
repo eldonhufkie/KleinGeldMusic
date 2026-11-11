@@ -44,6 +44,26 @@ else
                             <li>@track.Title @track.Duration?.ToString(@"m\:ss")</li>
                         }
                     </ol>
+                    @if (release.RemovedTracks is { Count: > 0 } removed)
+                    {
+                        <p>Removed Tracks:</p>
+                        <ul>
+                            @foreach (var track in removed)
+                            {
+                                <li>@track.Position. @track.Title</li>
+                            }
+                        </ul>
+                    }
+                    @if (release.ReplacedTracks is { Count: > 0 } replaced)
+                    {
+                        <p>Tracks with new audio:</p>
+                        <ul>
+                            @foreach (var track in replaced)
+                            {
+                                <li>@track.Position. @track.Title @track.Duration?.ToString(@"m\:ss")</li>
+                            }
+                        </ul>
+                    }
                 }
                 @if (_rejecting == release.Id)
                 {

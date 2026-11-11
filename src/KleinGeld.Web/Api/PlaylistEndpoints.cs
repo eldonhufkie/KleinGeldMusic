@@ -67,11 +67,12 @@ internal static class PlaylistEndpoints
                     Track = e.Track == null ? null : new
                     {
                         e.Track.Title,
-                        e.Track.Duration,
+                        // A replaced Track plays its live audio for Members until the Pending Changes are approved.
+                        Duration = e.Track.LiveConvertedBlobName != null ? e.Track.LiveDuration : e.Track.Duration,
                         e.Track.SingleMark,
                         e.Track.FeaturedArtists,
                         e.Track.Explicit,
-                        e.Track.Status,
+                        Ready = e.Track.LiveConvertedBlobName != null || e.Track.Status == TrackStatus.Ready,
                         e.Track.Release.ArtistId,
                         ArtistName = e.Track.Release.Artist.Name,
                         ReleaseId = e.Track.Release.Id,
@@ -86,14 +87,14 @@ internal static class PlaylistEndpoints
             var tracks = entries
                 .Select(e => e.Track is { Published: true } t
                     ? new PlaylistTrack(
-                        e.TrackId, t.Title, t.ArtistName, t.Status == TrackStatus.Ready, t.ArtistId, t.ReleaseId,
+                        e.TrackId, t.Title, t.ArtistName, t.Ready, t.ArtistId, t.ReleaseId,
                         t.ReleaseTitle, t.ReleaseSlug, t.Duration, t.SingleMark, t.FeaturedArtists, t.Explicit) { EntryId = e.Id }
                     : new PlaylistTrack(e.TrackId, e.Title, e.ArtistName, IsAvailable: false) { EntryId = e.Id })
                 .ToList();
             var total = TimeSpan.FromTicks(tracks.Where(t => t.IsAvailable).Sum(t => t.Duration?.Ticks ?? 0));
 
             // The cover is the cover of the first playable Track's Release.
-            var coverOf = entries.FirstOrDefault(e => e.Track is { Published: true, Status: TrackStatus.Ready })?.Track;
+            var coverOf = entries.FirstOrDefault(e => e.Track is { Published: true, Ready: true })?.Track;
             return Results.Ok(new PlaylistDetails(playlist.Id, playlist.Name, playlist.Slug, playlist.ChangedAt, tracks, total)
             {
                 Cover = coverOf?.CoverId is { } coverId ? covers.LinksTo(coverOf.ReleaseId, coverId) : null,
