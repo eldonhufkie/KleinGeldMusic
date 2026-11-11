@@ -324,6 +324,33 @@ public sealed partial class SubmitReleaseTests
         Assert.Equal(newAudio, await PlayedBlobAsync(manager, replaced.Id));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Deleting_a_Published_Release_discards_its_Pending_Changes_with_the_old_and_new_audio(bool byAdmin)
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreatePublishedAsync(manager, admin);
+        var replaced = (await ReadTracksAsync(manager, release)).Single();
+        await WaitUntilConvertedAsync(manager, release, await ReplaceAudioAsync(manager, release, replaced.Id, "tone.flac"));
+        var added = await AddTrackAsync(manager, release, "tone.mp3");
+        await WaitUntilConvertedAsync(manager, release, added);
+        var addedTrack = (await ReadTracksAsync(manager, release)).Single(t => t.Id == added.Track.Id);
+        var oldAudio = await PlayedBlobAsync(manager, replaced.Id, old: true);
+        var newAudio = await PlayedBlobAsync(manager, replaced.Id);
+        Assert.NotEqual(oldAudio, newAudio);
+
+        using var deleted = byAdmin
+            ? await admin.PostAsJsonAsync($"/api/admin/releases/{release.Id}/delete", new DeleteForm { Reason = "Weg." })
+            : await manager.DeleteAsync($"/api/releases/{release.Id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        Assert.Empty(await StoredBlobsAsync(release, replaced));
+        Assert.Empty(await StoredBlobsAsync(release, addedTrack));
+        Assert.DoesNotContain(await ReadReviewAsync(admin), r => r.Id == release.Id);
+    }
+
     /// <summary>Adds a Track as Pending Changes and has the Admin approve it, so it is one of the Release's own.</summary>
     private async Task<TrackUpload> AddApprovedTrackAsync(HttpClient manager, HttpClient admin, ReleaseDetails release)
     {
