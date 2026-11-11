@@ -89,6 +89,18 @@ else
 
         <button type="submit" disabled="@_renaming">@(_renaming ? "Saving…" : "Save name")</button>
     </EditForm>
+
+    <h2>Delete</h2>
+    @if (_confirmingDelete)
+    {
+        <p>Delete @_artist.Name and all @_artist.Releases.Count of its Releases for good?</p>
+        <button type="button" disabled="@_deleting" @onclick="DeleteAsync">Yes, delete it</button>
+        <button type="button" disabled="@_deleting" @onclick="() => _confirmingDelete = false">Keep it</button>
+    }
+    else
+    {
+        <button type="button" @onclick="() => _confirmingDelete = true">Delete Artist</button>
+    }
 }
 
 @code {
@@ -106,6 +118,8 @@ else
     private string? _refusal;
     private bool _renaming;
     private bool _failed;
+    private bool _confirmingDelete;
+    private bool _deleting;
 
     protected override Task OnParametersSetAsync() => LoadAsync();
 
@@ -214,6 +228,30 @@ else
         finally
         {
             _renaming = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        _deleting = true;
+        _failed = false;
+        try
+        {
+            using var response = await Http.DeleteAsync($"api/artists/{Id}");
+            _failed = !response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+            {
+                await ManagedArtists.LoadAsync();
+                Navigation.NavigateTo("my-artists");
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _deleting = false;
         }
     }
 }

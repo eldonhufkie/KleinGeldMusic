@@ -2,6 +2,7 @@ using System.Security.Claims;
 using KleinGeld.Contracts;
 using KleinGeld.Data;
 using KleinGeld.Web.Blobs;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
 namespace KleinGeld.Web.Api;
@@ -11,7 +12,7 @@ internal static class ArtistEndpoints
     /// <summary>How many Artists the grid loads at a time.</summary>
     private const int LoadSize = 48;
 
-    /// <summary>Endpoints for creating and browsing Artists and for the My Artists pages of their managers.</summary>
+    /// <summary>Endpoints for creating, browsing and deleting Artists and for the My Artists pages of their managers.</summary>
     public static void MapArtistEndpoints(this RouteGroupBuilder api)
     {
         api.MapPost("/artists", async (ArtistForm form, ClaimsPrincipal caller, KleinGeldDbContext db) =>
@@ -222,6 +223,45 @@ internal static class ArtistEndpoints
                 artist.Managers.Remove(manager);
                 return Task.FromResult(Results.NoContent());
             }));
+
+        api.MapDelete("/artists/{id:guid}", async (
+            Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers, BlobLinks links, PlayLinks playLinks) =>
+        {
+            List<Guid> releaseIds = [];
+            List<string> blobNames = [];
+            var anyPublished = false;
+            var result = await ChangeManagersAsync(db, id, caller, async artist =>
+            {
+                var releases = await db.Releases.Include(r => r.Tracks).Where(r => r.ArtistId == id).ToListAsync();
+                releaseIds = releases.Select(r => r.Id).ToList();
+                blobNames = releases.SelectMany(r => r.Tracks).SelectMany(t => t.BlobNames()).ToList();
+                anyPublished = releases.Any(r => r.Stage == ReleaseStage.Published);
+                db.Artists.Remove(artist);
+                return Results.NoContent();
+            });
+            if (result is not NoContent)
+            {
+                return result;
+            }
+
+            // After the commit, so a link fetched meanwhile is either refused or signed against the policy that goes.
+            if (anyPublished)
+            {
+                await playLinks.RevokeAllAsync();
+            }
+
+            foreach (var releaseId in releaseIds)
+            {
+                await covers.DeleteAllAsync(releaseId);
+            }
+
+            foreach (var blobName in blobNames)
+            {
+                await links.Blob(TrackEndpoints.AudioContainer, blobName).DeleteIfExistsAsync();
+            }
+
+            return result;
+        });
     }
 
     private static ArtistRelease ToArtistRelease(Release release, CoverStore covers) => new(
