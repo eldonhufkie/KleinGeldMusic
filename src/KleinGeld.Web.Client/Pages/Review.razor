@@ -60,7 +60,18 @@ else
                         <ul>
                             @foreach (var track in replaced)
                             {
-                                <li>@track.Position. @track.Title @track.Duration?.ToString(@"m\:ss")</li>
+                                <li>
+                                    @track.Position. @track.Title @track.Duration?.ToString(@"m\:ss")
+                                    @* The Admin compares the live audio with the new audio before approving. *@
+                                    <div class="join-request-actions">
+                                        <button type="button" @onclick="() => ListenAsync(track.Id, old: true)">Play old audio</button>
+                                        <button type="button" @onclick="() => ListenAsync(track.Id, old: false)">Play new audio</button>
+                                    </div>
+                                    @if (_listening is { } listening && listening.TrackId == track.Id)
+                                    {
+                                        <audio controls autoplay src="@listening.Url" aria-label="@(listening.Old ? "Old" : "New") audio of @track.Title"></audio>
+                                    }
+                                </li>
                             }
                         </ul>
                     }
@@ -95,6 +106,23 @@ else
     private Guid? _rejecting;
     private string _reason = "";
     private bool _busy;
+
+    /// <summary>The old or new audio of a replaced Track the Admin is listening to.</summary>
+    private (Guid TrackId, bool Old, string Url)? _listening;
+
+    private async Task ListenAsync(Guid trackId, bool old)
+    {
+        _failed = false;
+        try
+        {
+            var link = await Http.GetFromJsonAsync<PlayLink>($"api/tracks/{trackId}/play-link{(old ? "?old=true" : "")}");
+            _listening = (trackId, old, link!.Url.ToString());
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
 
     private void StartRejecting(ReviewRelease release)
     {
