@@ -22,17 +22,26 @@ internal static class TrackEndpoints
                 .Where(r => r.Id == releaseId)
                 .VisibleTo(caller)
                 .SingleOrDefaultAsync();
+            if (release is null)
+            {
+                return Results.NotFound();
+            }
 
-            return release is null
-                ? Results.NotFound()
-                : Results.Ok(release.Tracks.OrderBy(t => t.Position).Select(ToSummary));
+            var seesPending = await db.Releases.Where(r => r.Id == releaseId).SeesPendingChanges(caller).AnyAsync();
+            return Results.Ok(release.Tracks
+                .Where(t => seesPending || !t.Pending)
+                .OrderBy(t => t.Position)
+                .Select(ToSummary));
         });
 
         api.MapGet("/tracks/{id:guid}/play-link", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, PlayLinks links, CoverStore covers) =>
         {
             // The access rule is the visibility rule: whoever may see a Track's Release may play the Track.
+            // Pending Changes aren't part of the Release yet, so only those who see them may play their Tracks.
+            var withPending = db.Releases.SeesPendingChanges(caller).Select(r => r.Id);
             var found = await db.Releases
                 .VisibleTo(caller)
+                .Where(r => !r.Tracks.Any(t => t.Id == id && t.Pending) || withPending.Contains(r.Id))
                 .SelectMany(r => r.Tracks, (release, track) => new { ReleaseId = release.Id, release.CoverId, Track = track })
                 .SingleOrDefaultAsync(row => row.Track.Id == id);
             if (found is null)
@@ -55,7 +64,7 @@ internal static class TrackEndpoints
         api.MapPost("/releases/{id:guid}/tracks", async (Guid id, TrackUploadForm form, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links) =>
         {
             Track? added = null;
-            var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+            var refused = await WithReleaseLockedAsync(db, id, caller, adding: true, async release =>
             {
                 if (release.Tracks.Count >= TrackUploadForm.MaxTracksPerRelease)
                 {
@@ -73,8 +82,13 @@ internal static class TrackEndpoints
                     Position = release.Tracks.Count + 1,
                     // No extension: the name must tell ffprobe nothing about the file.
                     OriginalBlobName = $"tracks/{trackId}/{Guid.CreateVersion7()}",
+                    Pending = release.Stage == ReleaseStage.Published,
                 };
                 db.Tracks.Add(added);
+                if (added.Pending)
+                {
+                    release.PendingChanges ??= ReleaseStage.Draft;
+                }
                 await db.SaveChangesAsync();
                 return null;
             });
@@ -149,7 +163,7 @@ internal static class TrackEndpoints
             }
 
             Track? confirmed = null;
-            var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+            var refused = await WithReleaseLockedAsync(db, id, caller, trackId, async release =>
             {
                 confirmed = release.Tracks.SingleOrDefault(t => t.Id == trackId);
                 if (confirmed is null)
@@ -177,7 +191,7 @@ internal static class TrackEndpoints
         {
             Track? replaced = null;
             List<string> oldBlobNames = [];
-            var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+            var refused = await WithReleaseLockedAsync(db, id, caller, trackId, async release =>
             {
                 var track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
                 if (track is null)
@@ -215,7 +229,7 @@ internal static class TrackEndpoints
         api.MapPut("/releases/{id:guid}/tracks/order", async (
             Guid id, TrackOrderForm form, ClaimsPrincipal caller, KleinGeldDbContext db) =>
         {
-            var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+            var refused = await WithReleaseLockedAsync(db, id, caller, trackId: null, async release =>
             {
                 // A list out of step with the Release means someone else added or removed a Track meanwhile.
                 if (form.TrackIds.Count != release.Tracks.Count
@@ -272,7 +286,7 @@ internal static class TrackEndpoints
     private static async Task<IResult> RemoveAsync(KleinGeldDbContext db, BlobLinks links, Guid id, Guid trackId, ClaimsPrincipal caller)
     {
         List<string> blobNames = [];
-        var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+        var refused = await WithReleaseLockedAsync(db, id, caller, trackId, async release =>
         {
             var track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
             if (track is null)
@@ -285,6 +299,10 @@ internal static class TrackEndpoints
             foreach (var later in release.Tracks.Where(t => t.Position > track.Position))
             {
                 later.Position--;
+            }
+            if (release.Tracks.All(t => t == track || !t.Pending))
+            {
+                release.PendingChanges = null;
             }
             await db.SaveChangesAsync();
             return null;
@@ -304,16 +322,38 @@ internal static class TrackEndpoints
     /// <summary>
     /// Changes a Release's Track list while holding a lock on the Release, so concurrent uploads can't get past the
     /// Track limit or share a Track number. Answers "not found" to anyone who doesn't manage the Artist, and refuses
-    /// a Release that can't be edited. <paramref name="change"/> returns null when it succeeded.
+    /// a Release that can't be edited. A Published Release takes new Tracks, and changes to them, as its Pending
+    /// Changes while those aren't Submitted; its own Tracks stay as they are. <paramref name="change"/> returns null
+    /// when it succeeded.
     /// </summary>
     private static Task<IResult?> WithReleaseLockedAsync(
-        KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, Func<Release, Task<IResult?>> change) =>
+        KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, Guid? trackId, Func<Release, Task<IResult?>> change) =>
+        WithReleaseLockedAsync(db, id, caller, adding: false, change, trackId);
+
+    private static Task<IResult?> WithReleaseLockedAsync(
+        KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, bool adding, Func<Release, Task<IResult?>> change, Guid? trackId = null) =>
         db.WithManagedReleaseLockedAsync(id, caller, release =>
-            release.Stage is ReleaseStage.Draft or ReleaseStage.Rejected
+        {
+            if (release.Stage is ReleaseStage.Draft or ReleaseStage.Rejected)
+            {
+                return change(release);
+            }
+            if (release.Stage != ReleaseStage.Published)
+            {
+                return Refuse("Tracks can only be changed on a Draft or Rejected Release.");
+            }
+            if (release.PendingChanges == ReleaseStage.Submitted)
+            {
+                return Refuse("Submitted Pending Changes can't be changed. Withdraw them first.");
+            }
+            var changesPendingTrack = trackId is { } changed && release.Tracks.Any(t => t.Id == changed && t.Pending);
+            return adding || changesPendingTrack
                 ? change(release)
-                : Task.FromResult<IResult?>(Results.Problem(
-                    "Tracks can only be changed on a Draft or Rejected Release.",
-                    statusCode: StatusCodes.Status409Conflict)));
+                : Refuse("A Published Release's own Tracks can't be changed, only the Tracks added in its Pending Changes.");
+        });
+
+    private static Task<IResult?> Refuse(string problem) =>
+        Task.FromResult<IResult?>(Results.Problem(problem, statusCode: StatusCodes.Status409Conflict));
 
     private static void PreFill(Release release, EmbeddedTags tags)
     {
@@ -333,6 +373,6 @@ internal static class TrackEndpoints
         return title.Length > ReleaseForm.TitleMaxLength ? title[..ReleaseForm.TitleMaxLength] : title;
     }
 
-    private static TrackSummary ToSummary(Track track) =>
-        new(track.Id, track.Title, track.Position, track.Status, track.SingleMark, track.FeaturedArtists, track.Explicit, track.Duration);
+    internal static TrackSummary ToSummary(Track track) =>
+        new(track.Id, track.Title, track.Position, track.Status, track.SingleMark, track.FeaturedArtists, track.Explicit, track.Duration, track.Pending);
 }

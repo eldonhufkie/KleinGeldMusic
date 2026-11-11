@@ -82,4 +82,26 @@ internal static class MemberEmails
             "",
             $"The Admin approved \"{release.Title}\" by {release.Artist.Name}. It's Published: every Member can now listen to it.",
         ]));
+
+    /// <summary>Email 7, for the Pending Changes of a Published Release.</summary>
+    public static OutgoingEmail PendingChangesApproved(MailboxAddress manager, Release release) =>
+        new(manager, $"Pending Changes to {release.Title} are Published", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin approved the Pending Changes to \"{release.Title}\" by {release.Artist.Name}. Every Member can now listen to the added Tracks.",
+        ]));
+
+    /// <summary>Email 8, for the Pending Changes of a Published Release.</summary>
+    public static OutgoingEmail PendingChangesRejected(MailboxAddress manager, Release release) =>
+        new(manager, $"Pending Changes to {release.Title} were rejected", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin rejected the Pending Changes to \"{release.Title}\" by {release.Artist.Name}:",
+            "",
+            release.PendingChangesRejectionReason!,
+            "",
+            "The Release stays Published as it was. You can change them under My Artists and submit them again.",
+        ]));
 }

@@ -29,6 +29,21 @@ internal static class Visibility
         return releases.Where(r => r.Stage == ReleaseStage.Published || r.Artist.Managers.Any(m => m.Id == memberId));
     }
 
+    /// <summary>
+    /// The Releases whose Pending Changes the caller sees: those of Artists they manage, or all for the Admin. Every
+    /// other Member sees a Published Release as it was until its Pending Changes are approved.
+    /// </summary>
+    public static IQueryable<Release> SeesPendingChanges(this IQueryable<Release> releases, ClaimsPrincipal caller)
+    {
+        if (caller.IsInRole(Roles.Admin))
+        {
+            return releases;
+        }
+
+        var memberId = caller.MemberId();
+        return releases.Where(r => r.Artist.Managers.Any(m => m.Id == memberId));
+    }
+
     public static IQueryable<Artist> VisibleTo(this IQueryable<Artist> artists, ClaimsPrincipal caller)
     {
         if (caller.IsInRole(Roles.Admin))

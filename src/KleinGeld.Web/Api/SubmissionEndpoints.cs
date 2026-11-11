@@ -62,27 +62,80 @@ internal static class SubmissionEndpoints
             }
 
             // The Release is Submitted whatever happens here: the Review page shows it even if the email fails.
-            try
-            {
-                var managerIds = await db.Artists
-                    .Where(a => a.Id == submitted!.ArtistId)
-                    .SelectMany(a => a.Managers)
-                    .Select(m => m.Id)
-                    .ToListAsync();
-                var admins = await members.GetUsersInRoleAsync(Roles.Admin);
-
-                // The Admin's own Artist: they know, whichever manager pressed Submit.
-                foreach (var admin in admins.Any(a => managerIds.Contains(a.Id)) ? [] : admins)
-                {
-                    await emails.SendAsync(AdminEmails.ReleaseSubmitted(new MailboxAddress(null, admin.Email!), submitted!));
-                }
-            }
-            catch (Exception exception)
-            {
-                loggers.CreateLogger(typeof(SubmissionEndpoints)).LogError(exception, "Couldn't email the Admin about Release {ReleaseId}.", id);
-            }
+            await EmailAdminAsync(submitted!, AdminEmails.ReleaseSubmitted, db, members, emails, loggers);
 
             return Results.Ok(submitted!.ToDetails(covers));
+        });
+
+        api.MapPost("/releases/{id:guid}/pending-changes/submit", async (
+            Guid id,
+            SubmitForm form,
+            ClaimsPrincipal caller,
+            KleinGeldDbContext db,
+            CoverStore covers,
+            TimeProvider clock,
+            UserManager<Member> members,
+            EmailSender emails,
+            ILoggerFactory loggers) =>
+        {
+            if (!form.RightsDeclared)
+            {
+                return Results.Problem("Tick the Rights Declaration to submit.", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            Release? submitted = null;
+            var refused = await db.WithManagedReleaseLockedAsync(id, caller, async release =>
+            {
+                if (release.PendingChanges is not (ReleaseStage.Draft or ReleaseStage.Rejected))
+                {
+                    return Results.Problem("Only Draft or Rejected Pending Changes can be submitted.", statusCode: StatusCodes.Status409Conflict);
+                }
+                if (release.Tracks.Any(t => t.Pending && t.Status != TrackStatus.Ready))
+                {
+                    return Results.Problem(
+                        "Wait until every added Track is Ready, and replace or remove any that Failed.",
+                        statusCode: StatusCodes.Status409Conflict);
+                }
+
+                db.RightsDeclarations.Add(new RightsDeclaration
+                {
+                    ReleaseId = release.Id,
+                    MemberId = caller.MemberId(),
+                    MadeAt = clock.GetUtcNow(),
+                    WordingVersion = RightsDeclarationWording.Version,
+                });
+                release.PendingChanges = ReleaseStage.Submitted;
+                await db.SaveChangesAsync();
+                submitted = release;
+                return null;
+            });
+            if (refused is not null)
+            {
+                return refused;
+            }
+
+            // The Pending Changes are Submitted whatever happens here, as with a Release.
+            await EmailAdminAsync(submitted!, AdminEmails.PendingChangesSubmitted, db, members, emails, loggers);
+
+            return Results.Ok(submitted!.ToDetails(covers));
+        });
+
+        api.MapPost("/releases/{id:guid}/pending-changes/withdraw", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers) =>
+        {
+            Release? withdrawn = null;
+            var refused = await db.WithManagedReleaseLockedAsync(id, caller, async release =>
+            {
+                if (release.PendingChanges != ReleaseStage.Submitted)
+                {
+                    return Results.Problem("Only Submitted Pending Changes can be withdrawn.", statusCode: StatusCodes.Status409Conflict);
+                }
+
+                release.PendingChanges = ReleaseStage.Draft;
+                await db.SaveChangesAsync();
+                withdrawn = release;
+                return null;
+            });
+            return refused ?? Results.Ok(withdrawn!.ToDetails(covers));
         });
 
         api.MapPost("/releases/{id:guid}/withdraw", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers) =>
@@ -102,5 +155,35 @@ internal static class SubmissionEndpoints
             });
             return refused ?? Results.Ok(withdrawn!.ToDetails(covers));
         });
+    }
+
+    /// <summary>Email 6 to the Admin, unless the Admin manages the Artist and so knows. A failure is only logged.</summary>
+    private static async Task EmailAdminAsync(
+        Release submitted,
+        Func<MailboxAddress, Release, OutgoingEmail> email,
+        KleinGeldDbContext db,
+        UserManager<Member> members,
+        EmailSender emails,
+        ILoggerFactory loggers)
+    {
+        try
+        {
+            var managerIds = await db.Artists
+                .Where(a => a.Id == submitted.ArtistId)
+                .SelectMany(a => a.Managers)
+                .Select(m => m.Id)
+                .ToListAsync();
+            var admins = await members.GetUsersInRoleAsync(Roles.Admin);
+
+            // The Admin's own Artist: they know, whichever manager pressed Submit.
+            foreach (var admin in admins.Any(a => managerIds.Contains(a.Id)) ? [] : admins)
+            {
+                await emails.SendAsync(email(new MailboxAddress(null, admin.Email!), submitted));
+            }
+        }
+        catch (Exception exception)
+        {
+            loggers.CreateLogger(typeof(SubmissionEndpoints)).LogError(exception, "Couldn't email the Admin about Release {ReleaseId}.", submitted.Id);
+        }
     }
 }

@@ -37,4 +37,13 @@ internal static class AdminEmails
             "",
             "Find it on the Review page.",
         ]));
+
+    /// <summary>Email 6, for the Pending Changes of a Published Release.</summary>
+    public static OutgoingEmail PendingChangesSubmitted(MailboxAddress admin, Release release) =>
+        new(admin, $"{release.Artist.Name} submitted Pending Changes to {release.Title}", string.Join(Environment.NewLine,
+        [
+            $"{release.Artist.Name} submitted Pending Changes to \"{release.Title}\" for review.",
+            "",
+            "Find them on the Review page.",
+        ]));
 }

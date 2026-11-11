@@ -39,6 +39,14 @@ else
                     {
                         <p class="rejection-reason">@release.RejectionReason</p>
                     }
+                    @if (release.PendingChanges is { } pending)
+                    {
+                        <span class="stage-badge">Pending Changes: @pending</span>
+                    }
+                    @if (release.PendingChangesRejectionReason is not null)
+                    {
+                        <p class="rejection-reason">@release.PendingChangesRejectionReason</p>
+                    }
                 </li>
             }
         </ul>

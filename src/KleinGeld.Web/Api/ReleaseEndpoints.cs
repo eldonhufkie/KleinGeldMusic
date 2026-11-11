@@ -50,9 +50,17 @@ internal static class ReleaseEndpoints
             {
                 return Results.NotFound();
             }
-            return slug == release.Slug
-                ? Results.Ok(release.ToDetails(covers))
-                : Results.Redirect($"/api/releases/{release.Id}/{release.Slug}");
+            if (slug != release.Slug)
+            {
+                return Results.Redirect($"/api/releases/{release.Id}/{release.Slug}");
+            }
+
+            // Other Members see the Release as it was, without a sign of its Pending Changes.
+            var details = release.ToDetails(covers);
+            var seesPending = await db.Releases.Where(r => r.Id == id).SeesPendingChanges(caller).AnyAsync();
+            return seesPending
+                ? Results.Ok(details)
+                : Results.Ok(details with { PendingChanges = null, PendingChangesRejectionReason = null });
         });
 
         api.MapPut("/releases/{id:guid}", async (Guid id, ReleaseForm form, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers) =>
@@ -122,5 +130,7 @@ internal static class ReleaseEndpoints
         release.Stage,
         release.CoverId is { } coverId ? covers.LinksTo(release.Id, coverId) : null,
         release.PublishedAt,
-        release.Stage == ReleaseStage.Rejected ? release.RejectionReason : null);
+        release.Stage == ReleaseStage.Rejected ? release.RejectionReason : null,
+        release.PendingChanges,
+        release.PendingChanges == ReleaseStage.Rejected ? release.PendingChangesRejectionReason : null);
 }
