@@ -240,7 +240,8 @@ internal static class TrackEndpoints
             Guid id, Guid trackId, TrackForm form, ClaimsPrincipal caller, KleinGeldDbContext db) =>
         {
             Track? track = null;
-            var refused = await WithReleaseLockedAsync(db, id, caller, async release =>
+            // Track details aren't reviewed, so they change at once on a Published Release too (#32).
+            var refused = await db.WithUnsubmittedReleaseLockedAsync(id, caller, async release =>
             {
                 track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
                 if (track is null)
