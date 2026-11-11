@@ -20,6 +20,9 @@ else
 {
     <h1>@_artist.Name</h1>
 
+    <AdminRemoval Action="Delete Artist" Busy="Deleting…" Question="Why is this Artist deleted, with all its Releases?"
+                  Url="@($"api/admin/artists/{_artist.Id}/delete")" OnDone="@(() => Navigation.NavigateTo("artists"))" />
+
     @if (_artist.Newest is not null)
     {
         <p><button type="button" aria-label="Play @_artist.Newest.Title" @onclick="PlayNewestAsync">Play</button></p>
