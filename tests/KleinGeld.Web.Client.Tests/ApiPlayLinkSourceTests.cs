@@ -16,8 +16,15 @@ public sealed class ApiPlayLinkSourceTests
         Assert.Null(await source.ForTrackAsync(Guid.CreateVersion7()));
     }
 
+    [Fact]
+    public async Task An_unauthorized_answer_means_the_session_has_ended()
+    {
+        var source = SourceAnswering(() => new HttpResponseMessage(HttpStatusCode.Unauthorized));
+
+        await Assert.ThrowsAsync<SessionEndedException>(() => source.ForTrackAsync(Guid.CreateVersion7()));
+    }
+
     [Theory]
-    [InlineData(HttpStatusCode.Unauthorized)]
     [InlineData(HttpStatusCode.InternalServerError)]
     [InlineData(HttpStatusCode.BadGateway)]
     [InlineData(HttpStatusCode.ServiceUnavailable)]

@@ -53,6 +53,12 @@ export function attach(element, dotNet) {
         audio.addEventListener(event, report);
     }
     audio.addEventListener("ended", () => listener.invokeMethodAsync("End"));
+    // A revoked or expired play link: the player asks for a fresh one and decides what happens next.
+    audio.addEventListener("error", () => {
+        if (audio.src) {
+            listener.invokeMethodAsync("Fail");
+        }
+    });
     listenForMediaKeys();
 }
 

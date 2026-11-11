@@ -15,6 +15,8 @@ public sealed class JsAudioElement(IJSRuntime js) : IAudioElement, IAsyncDisposa
 
     public event Func<Task>? Ended;
 
+    public event Func<Task>? Failed;
+
     public async Task AttachAsync(ElementReference element)
     {
         _self = DotNetObjectReference.Create(this);
@@ -52,6 +54,9 @@ public sealed class JsAudioElement(IJSRuntime js) : IAudioElement, IAsyncDisposa
 
     [JSInvokable]
     public Task End() => Ended?.Invoke() ?? Task.CompletedTask;
+
+    [JSInvokable]
+    public Task Fail() => Failed?.Invoke() ?? Task.CompletedTask;
 
     public async ValueTask DisposeAsync()
     {

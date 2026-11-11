@@ -61,9 +61,13 @@ public sealed class PlayerService
             _ => Task.CompletedTask,
         };
         _audio.Ended += EndAsync;
+        _audio.Failed += RecoverAsync;
     }
 
     public event Action? Changed;
+
+    /// <summary>Raised when the API no longer knows the Member, so the page can send them to log in again.</summary>
+    public event Action? SessionEnded;
 
     /// <summary>The whole Queue: the Tracks already played, the current one and those still to come.</summary>
     public IReadOnlyList<PlayerTrack> Queue => _queue.Select(entry => entry.Track).ToList();
@@ -383,6 +387,120 @@ public sealed class PlayerService
     // Only a Track ending by itself loops: Next always moves on. It starts over, because its play link may have expired.
     private Task EndAsync() =>
         Repeat == RepeatMode.One && Current is not null ? StartAsync(_queue, CurrentIndex) : NextAsync();
+
+    // A link stops working when it expires or its Release is Taken down: a fresh one tells which, and carries on if it can.
+    private async Task RecoverAsync()
+    {
+        if (Current is not { } track || _awaitingFirstPlay)
+        {
+            return;
+        }
+
+        var attempt = ++_attempt;
+        _starting = null;
+        var position = Position;
+        PlayLink? link;
+        try
+        {
+            link = await _links.ForTrackAsync(track.Id);
+        }
+        catch (SessionEndedException)
+        {
+            if (attempt == _attempt)
+            {
+                await StopForLoginAsync();
+            }
+
+            return;
+        }
+        catch (PlayLinkFailedException)
+        {
+            if (attempt == _attempt)
+            {
+                Refuse(track);
+            }
+
+            return;
+        }
+
+        if (attempt != _attempt)
+        {
+            return;
+        }
+
+        if (link is not null)
+        {
+            IsPlaying = true;
+            await _audio.PlayFromAsync(link.Url.ToString(), position);
+            Changed?.Invoke();
+            return;
+        }
+
+        await SkipPastAsync(track, attempt);
+    }
+
+    // The next Track in the Queue that still gets a link; the Queue's end stops the player there.
+    private async Task SkipPastAsync(PlayerTrack gone, int attempt)
+    {
+        for (var index = CurrentIndex + 1; index < _queue.Count; index++)
+        {
+            var entry = _queue[index];
+            PlayLink? link;
+            try
+            {
+                link = await _links.ForTrackAsync(entry.Track.Id);
+            }
+            catch (SessionEndedException)
+            {
+                if (attempt == _attempt)
+                {
+                    await StopForLoginAsync();
+                }
+
+                return;
+            }
+            catch (PlayLinkFailedException)
+            {
+                link = null;
+            }
+
+            if (attempt != _attempt)
+            {
+                return;
+            }
+
+            if (link is null)
+            {
+                continue;
+            }
+
+            CurrentIndex = _queue.FindIndex(candidate => ReferenceEquals(candidate, entry));
+            Position = TimeSpan.Zero;
+            Duration = TimeSpan.Zero;
+            IsPlaying = true;
+            Notice = $"{gone.Title} can't be played any more.";
+            await _audio.ShowMetadataAsync(new MediaMetadata(entry.Track.Title, entry.Track.Artist, link.Cover));
+            await _audio.PlayAsync(link.Url.ToString());
+            Save();
+            Changed?.Invoke();
+            return;
+        }
+
+        await _audio.PauseAsync();
+        IsPlaying = false;
+        Notice = $"{gone.Title} can't be played any more.";
+        Save();
+        Changed?.Invoke();
+    }
+
+    private async Task StopForLoginAsync()
+    {
+        await _audio.PauseAsync();
+        IsPlaying = false;
+        Save();
+        Changed?.Invoke();
+        SessionEnded?.Invoke();
+    }
 
     private async Task StartAsync(List<QueueEntry> queue, int index)
     {

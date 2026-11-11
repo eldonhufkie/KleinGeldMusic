@@ -18,6 +18,11 @@ public sealed class ApiPlayLinkSource(HttpClient http) : IPlayLinkSource
                 return null;
             }
 
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                throw new SessionEndedException();
+            }
+
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadFromJsonAsync<PlayLink>();
         }

@@ -940,6 +940,69 @@ public sealed class PlayerServiceTests
 
     private List<string> Titles() => _player.Queue.Select(track => track.Title).ToList();
 
+    [Fact]
+    public async Task When_playback_fails_the_player_fetches_a_fresh_link_and_resumes_at_the_same_position()
+    {
+        await _player.PlayAsync(Track);
+        _audio.Report(new AudioProgress(TimeSpan.FromSeconds(42), TimeSpan.FromMinutes(3), IsPlaying: true));
+        var fresh = new Uri("https://blobs.example/track.m4a?sig=fresh");
+        _links.Add(Track.Id, fresh);
+
+        await _audio.FailAsync();
+
+        Assert.Equal(fresh.ToString(), _audio.PlayingSource);
+        Assert.Equal(TimeSpan.FromSeconds(42), _audio.PlayedFrom);
+        Assert.Equal(Track, _player.Current);
+        Assert.True(_player.IsPlaying);
+        Assert.Null(_player.Notice);
+    }
+
+    [Fact]
+    public async Task When_the_fresh_link_is_refused_the_player_skips_to_the_next_playable_Track_with_a_notice()
+    {
+        var album = Album("Een", "Twee", "Drie");
+        await _player.PlayAsync(album, 0);
+        _links.Remove(album[0].Id);
+        _links.Remove(album[1].Id);
+
+        await _audio.FailAsync();
+
+        Assert.Equal(album[2], _player.Current);
+        Assert.Equal(LinkOf(album[2]), _audio.PlayingSource);
+        Assert.True(_player.IsPlaying);
+        Assert.Equal("Een can't be played any more.", _player.Notice);
+    }
+
+    [Fact]
+    public async Task When_no_later_Track_is_playable_the_player_stops_with_a_notice()
+    {
+        var album = Album("Een", "Twee");
+        await _player.PlayAsync(album, 0);
+        _links.Remove(album[0].Id);
+        _links.Remove(album[1].Id);
+
+        await _audio.FailAsync();
+
+        Assert.False(_player.IsPlaying);
+        Assert.True(_audio.IsPaused);
+        Assert.Equal("Een can't be played any more.", _player.Notice);
+    }
+
+    [Fact]
+    public async Task When_the_session_has_ended_the_player_stops_and_sends_the_Member_to_login()
+    {
+        var loginAsked = 0;
+        _player.SessionEnded += () => loginAsked++;
+        await _player.PlayAsync(Track);
+        _links.EndSession();
+
+        await _audio.FailAsync();
+
+        Assert.False(_player.IsPlaying);
+        Assert.True(_audio.IsPaused);
+        Assert.Equal(1, loginAsked);
+    }
+
     private List<PlayerTrack> Album(params string[] titles)
     {
         var album = titles.Select(title => new PlayerTrack(Guid.CreateVersion7(), title, "De Kleingeld")).ToList();
@@ -1440,6 +1503,11 @@ public sealed class PlayerServiceTests
         private readonly Dictionary<Guid, TaskCompletionSource> _held = [];
         private readonly HashSet<Guid> _failing = [];
 
+        private bool _sessionEnded;
+
+        /// <summary>Makes every request answer as the API does once the login has gone.</summary>
+        public void EndSession() => _sessionEnded = true;
+
         public void Add(Guid trackId, Uri link, CoverArt? cover = null) =>
             _links[trackId] = new PlayLink(link, DateTimeOffset.UtcNow.AddMinutes(10), cover);
 
@@ -1458,6 +1526,11 @@ public sealed class PlayerServiceTests
             if (_held.TryGetValue(trackId, out var held))
             {
                 await held.Task;
+            }
+
+            if (_sessionEnded)
+            {
+                throw new SessionEndedException();
             }
 
             if (_failing.Contains(trackId))
@@ -1541,6 +1614,10 @@ public sealed class PlayerServiceTests
         public event Func<MediaCommand, Task>? MediaCommanded;
 
         public event Func<Task>? Ended;
+
+        public event Func<Task>? Failed;
+
+        public Task FailAsync() => Failed!.Invoke();
 
         public Task EndAsync() => Ended!.Invoke();
 
