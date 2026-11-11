@@ -113,7 +113,8 @@ internal static class PlaylistEndpoints
                 return Results.Problem($"Already on {playlist.Name}.", statusCode: StatusCodes.Status409Conflict);
             }
 
-            playlist.Entries.Add(new PlaylistEntry
+            // Added explicitly: the key is set client-side, so via the navigation EF would take it for an existing row.
+            db.Add(new PlaylistEntry
             {
                 PlaylistId = playlist.Id,
                 TrackId = track.Id,
