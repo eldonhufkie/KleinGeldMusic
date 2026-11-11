@@ -133,10 +133,6 @@ internal static class PlaylistEndpoints
             {
                 return TooManyTracks();
             }
-            if (playlist.Entries.Count >= MaxTracks)
-            {
-                return TooManyTracks();
-            }
 
             // Added explicitly: the key is set client-side, so via the navigation EF would take it for an existing row.
             db.Add(new PlaylistEntry
@@ -291,15 +287,23 @@ internal static class PlaylistEndpoints
             {
                 return Results.NotFound();
             }
-            // A Track that still exists must still be one the Member may see.
-            if (removed.TrackId is { } trackId &&
-                !await db.Releases.VisibleTo(caller).SelectMany(r => r.Tracks).AnyAsync(t => t.Id == trackId))
+            // The title and Artist come from the Track itself, never from the request, so a Track that no longer
+            // exists (or that the Member may no longer see) can't be put back.
+            var track = await db.Releases
+                .VisibleTo(caller)
+                .SelectMany(r => r.Tracks, (release, t) => new { t.Id, t.Title, ArtistName = release.Artist.Name })
+                .SingleOrDefaultAsync(t => t.Id == removed.TrackId);
+            if (track is null)
             {
                 return Results.NotFound();
             }
-            if (removed.TrackId is not null && playlist.Entries.Any(e => e.TrackId == removed.TrackId))
+            if (playlist.Entries.Any(e => e.TrackId == track.Id))
             {
                 return Results.Problem($"Already on {playlist.Name}.", statusCode: StatusCodes.Status409Conflict);
+            }
+            if (playlist.Entries.Count >= MaxTracks)
+            {
+                return TooManyTracks();
             }
 
             var entries = playlist.Entries.OrderBy(e => e.Position).ToList();
@@ -307,10 +311,10 @@ internal static class PlaylistEndpoints
             var entry = new PlaylistEntry
             {
                 PlaylistId = playlist.Id,
-                TrackId = removed.TrackId,
+                TrackId = track.Id,
                 Position = 0,
-                Title = removed.Title,
-                ArtistName = removed.ArtistName,
+                Title = track.Title,
+                ArtistName = track.ArtistName,
             };
             db.Add(entry);
             entries.Insert(Math.Clamp(removed.Position, 1, entries.Count + 1) - 1, entry);
