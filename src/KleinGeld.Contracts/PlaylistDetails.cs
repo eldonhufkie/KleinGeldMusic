@@ -7,7 +7,11 @@ public sealed record PlaylistDetails(
     string Slug,
     DateTimeOffset ChangedAt,
     IReadOnlyList<PlaylistTrack> Tracks,
-    TimeSpan TotalDuration);
+    TimeSpan TotalDuration)
+{
+    /// <summary>The cover of the first playable Track's Release; none while no Track is playable.</summary>
+    public CoverArt? Cover { get; init; }
+}
 
 /// <summary>
 /// One entry on a Playlist. <paramref name="Title"/> and <paramref name="ArtistName"/> are the snapshot taken when it
@@ -25,4 +29,8 @@ public sealed record PlaylistTrack(
     TimeSpan? Duration = null,
     bool SingleMark = false,
     string? FeaturedArtists = null,
-    bool Explicit = false);
+    bool Explicit = false)
+{
+    /// <summary>Identifies this entry for moving and removing; a Track can be Unavailable and have no id.</summary>
+    public Guid EntryId { get; init; }
+}
