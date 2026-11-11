@@ -76,16 +76,12 @@ internal static class ReleaseEndpoints
             return refused ?? Results.Ok(edited!.ToDetails(covers));
         });
 
-        api.MapDelete("/releases/{id:guid}", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers, BlobLinks links, PlayLinks playLinks) =>
+        api.MapDelete("/releases/{id:guid}", async (Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, [AsParameters] RemovalStores stores) =>
         {
-            List<string> blobNames = [];
-            var wasPublished = false;
+            var removed = Removed.Nothing;
             var refused = await db.WithUnsubmittedReleaseLockedAsync(id, caller, async release =>
             {
-                wasPublished = release.Stage == ReleaseStage.Published;
-                blobNames = release.Tracks.SelectMany(t => t.BlobNames()).ToList();
-                db.Releases.Remove(release);
-                await db.SaveChangesAsync();
+                removed = await db.RemoveReleaseAsync(release);
                 return null;
             });
             if (refused is not null)
@@ -93,19 +89,7 @@ internal static class ReleaseEndpoints
                 return refused;
             }
 
-            // After the commit, so a link fetched meanwhile is either refused or signed against the policy that goes.
-            if (wasPublished)
-            {
-                await playLinks.RevokeAllAsync();
-            }
-
-            await covers.DeleteAllAsync(id);
-
-            foreach (var blobName in blobNames)
-            {
-                await links.Blob(TrackEndpoints.AudioContainer, blobName).DeleteIfExistsAsync();
-            }
-
+            await stores.CleanUpAsync(removed);
             return Results.NoContent();
         });
     }

@@ -4,6 +4,7 @@ using KleinGeld.Web.Blobs;
 using KleinGeld.Web.Email;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http.HttpResults;
 using MimeKit;
 
 namespace KleinGeld.Web.Api;
@@ -17,18 +18,10 @@ internal static class AdminRemovalEndpoints
     public static void MapAdminRemovalEndpoints(this RouteGroupBuilder api)
     {
         api.MapPost("/releases/{id:guid}/reject", async (
-            Guid id,
-            RejectForm form,
-            KleinGeldDbContext db,
-            CoverStore covers,
-            BlobLinks links,
-            PlayLinks playLinks,
-            UserManager<Member> members,
-            EmailSender emails,
-            ILoggerFactory loggers) =>
+            Guid id, RejectForm form, KleinGeldDbContext db, [AsParameters] RemovalStores stores, [AsParameters] ManagerMail mail) =>
         {
             Release? rejected = null;
-            IReadOnlyList<string> unusedBlobs = [];
+            var removed = Removed.Nothing;
             var refused = await db.WithReviewedReleaseLockedAsync(id, async release =>
             {
                 if (release.Stage != ReleaseStage.Published)
@@ -37,7 +30,7 @@ internal static class AdminRemovalEndpoints
                 }
 
                 // Any Pending Changes fold into the Release, as on a Takedown, which is then reviewed whole on resubmission.
-                unusedBlobs = release.MergePendingChanges();
+                removed = new Removed([], release.MergePendingChanges(), AnyPublished: true);
                 release.Stage = ReleaseStage.Rejected;
                 release.RejectionReason = form.Reason.Trim();
                 await db.SaveChangesAsync();
@@ -49,35 +42,24 @@ internal static class AdminRemovalEndpoints
                 return refused;
             }
 
-            // After the commit, so a link fetched meanwhile is either refused or signed against the policy that goes.
-            await playLinks.RevokeAllAsync();
-            await DeleteBlobsAsync([], unusedBlobs, covers, links);
-            var addresses = await ManagerAddressesAsync(rejected!.ArtistId, db, members);
-            await SendAsync(addresses, a => MemberEmails.ReleaseRejected(a, rejected), rejected.Id, emails, loggers);
-            return Results.Ok(rejected.ToDetails(covers));
+            // Only unused audio goes: the Release keeps its covers.
+            await stores.CleanUpAsync(removed);
+            var addresses = await ManagingMemberAddressesAsync(rejected!.ArtistId, db, mail.Members);
+            await mail.SendAsync(addresses, a => MemberEmails.ReleaseRejected(a, rejected), rejected.Id);
+            return Results.Ok(rejected.ToDetails(stores.Covers));
         });
 
         api.MapPost("/releases/{id:guid}/delete", async (
-            Guid id,
-            DeleteForm form,
-            KleinGeldDbContext db,
-            CoverStore covers,
-            BlobLinks links,
-            PlayLinks playLinks,
-            UserManager<Member> members,
-            EmailSender emails,
-            ILoggerFactory loggers) =>
+            Guid id, DeleteForm form, KleinGeldDbContext db, [AsParameters] RemovalStores stores, [AsParameters] ManagerMail mail) =>
         {
-            List<string> blobNames = [];
+            var removed = Removed.Nothing;
             List<MailboxAddress> addresses = [];
-            var what = "";
+            var deletedName = "";
             var refused = await db.WithReviewedReleaseLockedAsync(id, async release =>
             {
-                addresses = await ManagerAddressesAsync(release.ArtistId, db, members);
-                what = $"\"{release.Title}\" by {release.Artist.Name}";
-                blobNames = release.Tracks.SelectMany(t => t.BlobNames()).ToList();
-                db.Releases.Remove(release);
-                await db.SaveChangesAsync();
+                addresses = await ManagingMemberAddressesAsync(release.ArtistId, db, mail.Members);
+                deletedName = $"\"{release.Title}\" by {release.Artist.Name}";
+                removed = await db.RemoveReleaseAsync(release);
                 return null;
             });
             if (refused is not null)
@@ -85,59 +67,36 @@ internal static class AdminRemovalEndpoints
                 return refused;
             }
 
-            await playLinks.RevokeAllAsync();
-            await DeleteBlobsAsync([id], blobNames, covers, links);
-            await SendAsync(addresses, a => MemberEmails.DeletedByAdmin(a, what, form.Reason.Trim()), id, emails, loggers);
+            await stores.CleanUpAsync(removed);
+            await mail.SendAsync(addresses, a => MemberEmails.DeletedByAdmin(a, deletedName, form.Reason.Trim()), id);
             return Results.NoContent();
         });
 
         api.MapPost("/artists/{id:guid}/delete", async (
-            Guid id,
-            DeleteForm form,
-            KleinGeldDbContext db,
-            CoverStore covers,
-            BlobLinks links,
-            PlayLinks playLinks,
-            UserManager<Member> members,
-            EmailSender emails,
-            ILoggerFactory loggers) =>
+            Guid id, DeleteForm form, KleinGeldDbContext db, [AsParameters] RemovalStores stores, [AsParameters] ManagerMail mail) =>
         {
-            var artist = await db.Artists
-                .Include(a => a.Releases).ThenInclude(r => r.Tracks)
-                .SingleOrDefaultAsync(a => a.Id == id);
-            if (artist is null)
+            var removed = Removed.Nothing;
+            List<MailboxAddress> addresses = [];
+            var deletedName = "";
+            var result = await db.WithReviewedArtistLockedAsync(id, async artist =>
             {
-                return Results.NotFound();
+                addresses = await ManagingMemberAddressesAsync(id, db, mail.Members);
+                deletedName = $"the Artist {artist.Name}";
+                removed = await db.RemoveArtistAsync(artist);
+                return Results.NoContent();
+            });
+            if (result is not NoContent)
+            {
+                return result;
             }
 
-            var addresses = await ManagerAddressesAsync(id, db, members);
-            var releaseIds = artist.Releases.Select(r => r.Id).ToList();
-            var blobNames = artist.Releases.SelectMany(r => r.Tracks).SelectMany(t => t.BlobNames()).ToList();
-            db.Artists.Remove(artist);
-            await db.SaveChangesAsync();
-
-            await playLinks.RevokeAllAsync();
-            await DeleteBlobsAsync(releaseIds, blobNames, covers, links);
-            await SendAsync(addresses, a => MemberEmails.DeletedByAdmin(a, $"the Artist {artist.Name}", form.Reason.Trim()), id, emails, loggers);
-            return Results.NoContent();
+            await stores.CleanUpAsync(removed);
+            await mail.SendAsync(addresses, a => MemberEmails.DeletedByAdmin(a, deletedName, form.Reason.Trim()), id);
+            return result;
         });
     }
-
-    private static async Task DeleteBlobsAsync(IEnumerable<Guid> releaseIds, IEnumerable<string> blobNames, CoverStore covers, BlobLinks links)
-    {
-        foreach (var releaseId in releaseIds)
-        {
-            await covers.DeleteAllAsync(releaseId);
-        }
-
-        foreach (var blobName in blobNames)
-        {
-            await links.Blob(TrackEndpoints.AudioContainer, blobName).DeleteIfExistsAsync();
-        }
-    }
-
     /// <summary>The Artist's managing Members, except any Admin, who made the decision.</summary>
-    private static async Task<List<MailboxAddress>> ManagerAddressesAsync(Guid artistId, KleinGeldDbContext db, UserManager<Member> members)
+    private static async Task<List<MailboxAddress>> ManagingMemberAddressesAsync(Guid artistId, KleinGeldDbContext db, UserManager<Member> members)
     {
         var adminIds = (await members.GetUsersInRoleAsync(Roles.Admin)).Select(a => a.Id).ToList();
         var addresses = await db.Artists
@@ -149,20 +108,23 @@ internal static class AdminRemovalEndpoints
         return addresses.Select(a => new MailboxAddress(null, a)).ToList();
     }
 
-    /// <summary>The change stands whatever happens here, so a failure is only logged.</summary>
-    private static async Task SendAsync(
-        IEnumerable<MailboxAddress> addresses, Func<MailboxAddress, OutgoingEmail> email, Guid id, EmailSender emails, ILoggerFactory loggers)
+    /// <summary>What telling an Artist's managing Members about the Admin's decision takes.</summary>
+    internal sealed record ManagerMail(UserManager<Member> Members, EmailSender Emails, ILoggerFactory Loggers)
     {
-        try
+        /// <summary>The change stands whatever happens here, so a failure is only logged.</summary>
+        public async Task SendAsync(IEnumerable<MailboxAddress> addresses, Func<MailboxAddress, OutgoingEmail> email, Guid id)
         {
-            foreach (var address in addresses)
+            try
             {
-                await emails.SendAsync(email(address));
+                foreach (var address in addresses)
+                {
+                    await Emails.SendAsync(email(address));
+                }
             }
-        }
-        catch (Exception exception)
-        {
-            loggers.CreateLogger(typeof(AdminRemovalEndpoints)).LogError(exception, "Couldn't email the managers about {Id}.", id);
+            catch (Exception exception)
+            {
+                Loggers.CreateLogger(typeof(AdminRemovalEndpoints)).LogError(exception, "Couldn't email the managing Members about {Id}.", id);
+            }
         }
     }
 }
