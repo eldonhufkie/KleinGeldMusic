@@ -21,12 +21,14 @@ internal static class AdminRemovalEndpoints
             RejectForm form,
             KleinGeldDbContext db,
             CoverStore covers,
+            BlobLinks links,
             PlayLinks playLinks,
             UserManager<Member> members,
             EmailSender emails,
             ILoggerFactory loggers) =>
         {
             Release? rejected = null;
+            IReadOnlyList<string> unusedBlobs = [];
             var refused = await db.WithReviewedReleaseLockedAsync(id, async release =>
             {
                 if (release.Stage != ReleaseStage.Published)
@@ -34,6 +36,8 @@ internal static class AdminRemovalEndpoints
                     return Results.Problem("Only a Published Release can be Rejected this way.", statusCode: StatusCodes.Status409Conflict);
                 }
 
+                // Any Pending Changes fold into the Release, as on a Takedown, which is then reviewed whole on resubmission.
+                unusedBlobs = release.MergePendingChanges();
                 release.Stage = ReleaseStage.Rejected;
                 release.RejectionReason = form.Reason.Trim();
                 await db.SaveChangesAsync();
@@ -47,6 +51,7 @@ internal static class AdminRemovalEndpoints
 
             // After the commit, so a link fetched meanwhile is either refused or signed against the policy that goes.
             await playLinks.RevokeAllAsync();
+            await DeleteBlobsAsync([], unusedBlobs, covers, links);
             var addresses = await ManagerAddressesAsync(rejected!.ArtistId, db, members);
             await SendAsync(addresses, a => MemberEmails.ReleaseRejected(a, rejected), rejected.Id, emails, loggers);
             return Results.Ok(rejected.ToDetails(covers));

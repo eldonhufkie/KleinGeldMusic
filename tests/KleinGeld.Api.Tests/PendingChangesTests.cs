@@ -298,6 +298,32 @@ public sealed partial class SubmitReleaseTests
         Assert.False(review.IsPendingChanges);
     }
 
+    [Fact]
+    public async Task The_Admin_Rejecting_a_Published_Release_folds_its_Pending_Changes_into_it()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreatePublishedAsync(manager, admin);
+        var replaced = (await ReadTracksAsync(manager, release)).Single();
+        var gone = await AddApprovedTrackAsync(manager, admin, release);
+        await WaitUntilConvertedAsync(manager, release, await ReplaceAudioAsync(manager, release, replaced.Id, "tone.flac"));
+        var newAudio = await PlayedBlobAsync(manager, replaced.Id);
+        (await manager.DeleteAsync($"/api/releases/{release.Id}/tracks/{gone.Track.Id}")).Dispose();
+        var added = await AddTrackAsync(manager, release, "tone.mp3");
+        await WaitUntilConvertedAsync(manager, release, added);
+        (await SubmitPendingChangesAsync(manager, release)).Dispose();
+
+        using var rejected = await admin.PostAsJsonAsync($"/api/admin/releases/{release.Id}/reject", new RejectForm { Reason = "Weg." });
+
+        Assert.Equal(HttpStatusCode.OK, rejected.StatusCode);
+        Assert.Null(await ReadPendingChangesAsync(manager, release));
+        Assert.DoesNotContain(await ReadReviewAsync(admin), r => r.Id == release.Id);
+        var tracks = await ReadTracksAsync(manager, release);
+        Assert.Equal([replaced.Id, added.Track.Id], tracks.OrderBy(t => t.Position).Select(t => t.Id));
+        Assert.All(tracks, t => Assert.False(t.Pending || t.Removed || t.Replaced));
+        Assert.Equal(newAudio, await PlayedBlobAsync(manager, replaced.Id));
+    }
+
     /// <summary>Adds a Track as Pending Changes and has the Admin approve it, so it is one of the Release's own.</summary>
     private async Task<TrackUpload> AddApprovedTrackAsync(HttpClient manager, HttpClient admin, ReleaseDetails release)
     {
