@@ -5,7 +5,7 @@
 
 @*
     The Track list of a Draft: adds audio files, straight to blob storage, with each upload's progress; follows their
-    conversion; edits each Track's details; reorders Tracks by dragging; and removes or replaces a Failed Track's audio.
+    conversion; edits each Track's details; reorders Tracks by dragging; and removes or replaces a Failed Track's audio, or a Published Release's own Tracks as Pending Changes.
 *@
 
 <h2>Tracks</h2>
@@ -35,17 +35,28 @@
                     {
                         <span class="stage-badge">Pending Changes</span>
                     }
+                    @if (track.Removed)
+                    {
+                        <span class="stage-badge">Removed in Pending Changes</span>
+                    }
+                    @if (track.Replaced)
+                    {
+                        <span class="stage-badge">New audio in Pending Changes</span>
+                    }
                     @track.Duration?.ToString(@"m\:ss")
                     @if (_progress.TryGetValue(track.Id, out var percent))
                     {
                         <progress max="100" value="@percent" aria-label="Upload of @track.Title">@percent%</progress>
                     }
-                    @if (track.Status == TrackStatus.Failed)
+                    @if (CanReplace(track))
                     {
                         <button type="button" disabled="@_busy" @onclick="() => _replacing = track">Replace audio</button>
                     }
                     <button type="button" disabled="@_busy" @onclick="() => StartEditing(track)">Edit</button>
-                    <button type="button" disabled="@_busy" @onclick="() => RemoveAsync(track)">Remove</button>
+                    @if (!track.Removed)
+                    {
+                        <button type="button" disabled="@_busy" @onclick="() => RemoveAsync(track)">Remove</button>
+                    }
 
                     @if (_editing == track.Id)
                     {
@@ -87,8 +98,13 @@
     public Guid ReleaseId { get; set; }
 
     /// <summary>A file was accepted, so its tags may have filled details of the Release.</summary>
+    /// <summary>Raised after a Track is confirmed or removed, which may change the Release or its Pending Changes.</summary>
     [Parameter]
     public EventCallback OnConfirmed { get; set; }
+
+    /// <summary>A Published Release's own Tracks can be removed or get new audio as Pending Changes.</summary>
+    [Parameter]
+    public bool Published { get; set; }
 
     /// <summary>The Tracks or their statuses changed, which decides whether the Release can be Submitted.</summary>
     [Parameter]
@@ -369,6 +385,10 @@
         _messages.Add($"{file.Name}: {problem?.Detail ?? "it couldn't be added. A file can be at most 500 MB."}");
     }
 
+    private bool CanReplace(TrackSummary track) =>
+        track.Status == TrackStatus.Failed
+        || (Published && !track.Pending && !track.Removed && track.Status == TrackStatus.Ready);
+
     private async Task RemoveAsync(TrackSummary track)
     {
         _busy = true;
@@ -377,6 +397,7 @@
         {
             using var _ = await Http.DeleteAsync($"api/releases/{ReleaseId}/tracks/{track.Id}");
             await LoadAsync();
+            await OnConfirmed.InvokeAsync();
         }
         catch (HttpRequestException)
         {

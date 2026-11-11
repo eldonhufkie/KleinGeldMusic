@@ -49,4 +49,32 @@ public sealed class Release
 
     /// <summary>One per submission, so a resubmitted Release has several; the newest dates the current one.</summary>
     public List<RightsDeclaration> RightsDeclarations { get; init; } = [];
+
+    /// <summary>
+    /// Makes the Pending Changes part of the Release, as approving them does, or as a Takedown or Reject does so the
+    /// Release is reviewed whole on resubmission: added Tracks stay, removed Tracks go and replaced Tracks keep only
+    /// their new audio. Returns the blobs no Track uses any more, for deleting once this is saved.
+    /// </summary>
+    public IReadOnlyList<string> MergePendingChanges()
+    {
+        List<string> unused = [];
+        foreach (var removed in Tracks.Where(t => t.PendingRemoval).ToList())
+        {
+            unused.AddRange(removed.BlobNames());
+            Tracks.Remove(removed);
+        }
+        foreach (var track in Tracks)
+        {
+            track.Pending = false;
+            unused.AddRange(track.DropLiveAudio());
+        }
+        var position = 1;
+        foreach (var track in Tracks.OrderBy(t => t.Position))
+        {
+            track.Position = position++;
+        }
+        PendingChanges = null;
+        PendingChangesRejectionReason = null;
+        return unused;
+    }
 }

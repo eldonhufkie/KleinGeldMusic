@@ -47,7 +47,57 @@ public sealed class Track
     /// <summary>The upload under way replaces Failed audio, so a rejected file returns the Track to Failed.</summary>
     public bool IsReplacingFailedAudio { get; set; }
 
-    /// <summary>Every blob holding this Track's audio.</summary>
+    /// <summary>Removed from a Published Release in its Pending Changes; Members keep it until they are approved.</summary>
+    public bool PendingRemoval { get; set; }
+
+    /// <summary>
+    /// The audio Members hear while the new audio of a replaced Track awaits review in Pending Changes; null when the
+    /// Track isn't replaced. The other blob and duration properties then hold the new audio.
+    /// </summary>
+    public string? LiveOriginalBlobName { get; set; }
+
+    public string? LiveConvertedBlobName { get; set; }
+
+    public TimeSpan? LiveDuration { get; set; }
+
+    /// <summary>Its new audio awaits review in Pending Changes; until then Members hear the live audio.</summary>
+    public bool IsReplaced => LiveConvertedBlobName is not null;
+
+    /// <summary>Whether it is part of its Release's Pending Changes: added, removed or replaced.</summary>
+    public bool IsPendingChange => Pending || PendingRemoval || IsReplaced;
+
+    /// <summary>Every blob holding this Track's audio, live or new.</summary>
     public IEnumerable<string> BlobNames() =>
-        ConvertedBlobName is null ? [OriginalBlobName] : [OriginalBlobName, ConvertedBlobName];
+        new[] { OriginalBlobName, ConvertedBlobName, LiveOriginalBlobName, LiveConvertedBlobName }.OfType<string>();
+
+    /// <summary>Puts the live audio aside for Members while new audio goes through upload and conversion.</summary>
+    public void KeepLiveAudio()
+    {
+        LiveOriginalBlobName = OriginalBlobName;
+        LiveConvertedBlobName = ConvertedBlobName;
+        LiveDuration = Duration;
+    }
+
+    /// <summary>Gives up the new audio and makes the live audio the Track's audio again, Ready as it was.</summary>
+    public void RestoreLiveAudio()
+    {
+        OriginalBlobName = LiveOriginalBlobName!;
+        ConvertedBlobName = LiveConvertedBlobName;
+        Duration = LiveDuration;
+        Status = TrackStatus.Ready;
+        IsReplacingFailedAudio = false;
+        LiveOriginalBlobName = null;
+        LiveConvertedBlobName = null;
+        LiveDuration = null;
+    }
+
+    /// <summary>Lets the new audio become the Track's only audio; returns the blobs of the live audio it replaces.</summary>
+    public IReadOnlyList<string> DropLiveAudio()
+    {
+        string?[] dropped = [LiveOriginalBlobName, LiveConvertedBlobName];
+        LiveOriginalBlobName = null;
+        LiveConvertedBlobName = null;
+        LiveDuration = null;
+        return dropped.OfType<string>().ToList();
+    }
 }

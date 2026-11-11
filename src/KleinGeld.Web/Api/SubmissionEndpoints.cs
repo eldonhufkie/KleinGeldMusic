@@ -90,10 +90,10 @@ internal static class SubmissionEndpoints
                 {
                     return Results.Problem("Only Draft or Rejected Pending Changes can be submitted.", statusCode: StatusCodes.Status409Conflict);
                 }
-                if (release.Tracks.Any(t => t.Pending && t.Status != TrackStatus.Ready))
+                if (release.Tracks.Any(t => (t.Pending || t.IsReplaced) && t.Status != TrackStatus.Ready))
                 {
                     return Results.Problem(
-                        "Wait until every added Track is Ready, and replace or remove any that Failed.",
+                        "Wait until every added or replaced Track is Ready, and replace or remove any that Failed.",
                         statusCode: StatusCodes.Status409Conflict);
                 }
 
@@ -157,9 +157,10 @@ internal static class SubmissionEndpoints
         });
 
         api.MapPost("/releases/{id:guid}/takedown", async (
-            Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers, PlayLinks links) =>
+            Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers, PlayLinks links, BlobLinks blobs) =>
         {
             Release? takenDown = null;
+            IReadOnlyList<string> unusedBlobs = [];
             var refused = await db.WithManagedReleaseLockedAsync(id, caller, async release =>
             {
                 if (release.Stage != ReleaseStage.Published)
@@ -167,6 +168,8 @@ internal static class SubmissionEndpoints
                     return Results.Problem("Only a Published Release can be taken down.", statusCode: StatusCodes.Status409Conflict);
                 }
 
+                // Any Pending Changes fold into the Release, which is then reviewed whole on resubmission.
+                unusedBlobs = release.MergePendingChanges();
                 release.Stage = ReleaseStage.TakenDown;
                 await db.SaveChangesAsync();
                 takenDown = release;
@@ -179,6 +182,10 @@ internal static class SubmissionEndpoints
 
             // After the commit, so a link fetched meanwhile is either refused or signed against the policy that goes.
             await links.RevokeAllAsync();
+            foreach (var blobName in unusedBlobs)
+            {
+                await blobs.Blob(Track.AudioContainer, blobName).DeleteIfExistsAsync();
+            }
             return Results.Ok(takenDown!.ToDetails(covers));
         });
     }

@@ -71,7 +71,7 @@ else
     {
         <CoverUpload Release="_release" OnUploaded="TakeInCover" />
 
-        <ReleaseTracks ReleaseId="_release.Id" OnConfirmed="TakeInPreFilledAsync" OnStatusesChanged="TakeInStatuses" />
+        <ReleaseTracks ReleaseId="_release.Id" Published="_release.Stage == ReleaseStage.Published" OnConfirmed="TakeInPreFilledAsync" OnStatusesChanged="TakeInStatuses" />
     }
     </fieldset>
 
