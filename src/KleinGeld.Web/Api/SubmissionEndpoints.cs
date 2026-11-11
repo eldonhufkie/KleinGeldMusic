@@ -11,7 +11,7 @@ namespace KleinGeld.Web.Api;
 
 internal static class SubmissionEndpoints
 {
-    /// <summary>Endpoints for managing Members to send a Release to the Admin's review and take it back.</summary>
+    /// <summary>Endpoints for managing Members to send a Release to the Admin's review, take it back, and Take down a Published one.</summary>
     public static void MapSubmissionEndpoints(this RouteGroupBuilder api)
     {
         api.MapPost("/releases/{id:guid}/submit", async (
@@ -33,9 +33,9 @@ internal static class SubmissionEndpoints
             Release? submitted = null;
             var refused = await db.WithManagedReleaseLockedAsync(id, caller, async release =>
             {
-                if (release.Stage is not (ReleaseStage.Draft or ReleaseStage.Rejected))
+                if (release.Stage is not (ReleaseStage.Draft or ReleaseStage.Rejected or ReleaseStage.TakenDown))
                 {
-                    return Results.Problem("Only a Draft or Rejected Release can be submitted.", statusCode: StatusCodes.Status409Conflict);
+                    return Results.Problem("Only a Draft, Rejected or Taken down Release can be submitted.", statusCode: StatusCodes.Status409Conflict);
                 }
 
                 var tracks = release.Tracks.Select(t => t.Status).ToList();
@@ -101,6 +101,32 @@ internal static class SubmissionEndpoints
                 return null;
             });
             return refused ?? Results.Ok(withdrawn!.ToDetails(covers));
+        });
+
+        api.MapPost("/releases/{id:guid}/takedown", async (
+            Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers, PlayLinks links) =>
+        {
+            Release? takenDown = null;
+            var refused = await db.WithManagedReleaseLockedAsync(id, caller, async release =>
+            {
+                if (release.Stage != ReleaseStage.Published)
+                {
+                    return Results.Problem("Only a Published Release can be taken down.", statusCode: StatusCodes.Status409Conflict);
+                }
+
+                release.Stage = ReleaseStage.TakenDown;
+                await db.SaveChangesAsync();
+                takenDown = release;
+                return null;
+            });
+            if (refused is not null)
+            {
+                return refused;
+            }
+
+            // After the commit, so a link fetched meanwhile is either refused or signed against the policy that goes.
+            await links.RevokeAllAsync();
+            return Results.Ok(takenDown!.ToDetails(covers));
         });
     }
 }

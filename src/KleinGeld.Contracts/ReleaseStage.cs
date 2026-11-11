@@ -10,4 +10,7 @@ public enum ReleaseStage
     Submitted,
     Published,
     Rejected,
+
+    /// <summary>Hidden from other Members by its own Artist after being Published; it can be resubmitted.</summary>
+    TakenDown,
 }
