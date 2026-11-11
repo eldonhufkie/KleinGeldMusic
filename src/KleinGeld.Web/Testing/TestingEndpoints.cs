@@ -113,6 +113,21 @@ internal static class TestingEndpoints
             return Results.NoContent();
         });
 
+        // The Track limit needs a full Playlist; adding a thousand Tracks through the API would take minutes.
+        testing.MapPost("/playlists/{id:guid}/filler", async (Guid id, KleinGeldDbContext db, [FromBody] int count) =>
+        {
+            var start = await db.Set<PlaylistEntry>().CountAsync(e => e.PlaylistId == id);
+            db.AddRange(Enumerable.Range(start + 1, count).Select(position => new PlaylistEntry
+            {
+                PlaylistId = id,
+                Position = position,
+                Title = $"Filler {position}",
+                ArtistName = "Filler",
+            }));
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
         testing.MapGet("/releases/{id:guid}/rejection-reason", async (Guid id, KleinGeldDbContext db) =>
             Results.Json(await db.Releases.Where(r => r.Id == id).Select(r => r.RejectionReason).SingleAsync()));
 

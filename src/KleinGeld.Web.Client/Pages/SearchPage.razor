@@ -217,6 +217,7 @@ else if (Group is not null)
                             <span> (feat. @track.FeaturedArtists)</span>
                         }
                         <span> · @track.ArtistName · @track.ReleaseTitle</span>
+                        <TrackMenu Track="new PlayerTrack(track.Id, track.Title, track.ArtistName)" />
                     </li>
                 }
             </ul>

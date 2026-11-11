@@ -1,0 +1,119 @@
+@inject HttpClient Http
+@inject IPlaylistsState MyPlaylists
+
+@* Adds a whole Release to a Playlist: the Tracks not yet on it, in Release order. *@
+
+<span class="track-menu release-add">
+    <button type="button" aria-expanded="@(_open ? "true" : "false")" @onclick="ToggleAsync">Add to Playlist</button>
+    @if (_open)
+    {
+        <span class="track-menu-items">
+            @if (_naming)
+            {
+                <form class="track-menu-new" @onsubmit="CreateAndAddAsync">
+                    <input aria-label="New Playlist name" maxlength="@PlaylistForm.NameMaxLength" @bind="_newName" />
+                    <button type="submit" disabled="@string.IsNullOrWhiteSpace(_newName)">Create</button>
+                </form>
+            }
+            else
+            {
+                <button type="button" @onclick="() => _naming = true">New Playlist…</button>
+            }
+            @foreach (var playlist in MyPlaylists.Playlists)
+            {
+                <button type="button" @key="playlist.Id" @onclick="() => AddAsync(playlist)">@playlist.Name</button>
+            }
+        </span>
+    }
+    @if (_notice is not null)
+    {
+        <span class="track-menu-notice" role="status">@_notice</span>
+    }
+</span>
+
+@code {
+    private bool _open;
+    private bool _naming;
+    private string _newName = "";
+    private string? _notice;
+
+    [Parameter, EditorRequired]
+    public Guid ReleaseId { get; set; }
+
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+        _naming = false;
+        _newName = "";
+        _notice = null;
+        if (_open)
+        {
+            try
+            {
+                await MyPlaylists.LoadAsync();
+            }
+            catch (HttpRequestException)
+            {
+                // The menu shows the Playlists it already knew of.
+            }
+        }
+    }
+
+    private async Task AddAsync(PlaylistSummary playlist)
+    {
+        _open = false;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync(
+                $"api/playlists/{playlist.Id}/releases", new AddReleaseToPlaylistForm { ReleaseId = ReleaseId });
+            if (!response.IsSuccessStatusCode)
+            {
+                _notice = await PlaylistRefusal.ReadAsync(response, "This Release couldn't be added.");
+                return;
+            }
+
+            var result = (await response.Content.ReadFromJsonAsync<AddReleaseToPlaylistResult>())!;
+            _notice = (result.Added, result.Skipped) switch
+            {
+                (0, _) => $"Already on {playlist.Name}",
+                (var added, 0) => $"Added {Tracks(added)} to {playlist.Name}",
+                (var added, var skipped) => $"Added {Tracks(added)} to {playlist.Name}; {skipped} already on it",
+            };
+            await MyPlaylists.LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _notice = "Something went wrong. Try again.";
+        }
+    }
+
+    private async Task CreateAndAddAsync()
+    {
+        var name = _newName.Trim();
+        if (name.Length == 0)
+        {
+            return;
+        }
+
+        _open = false;
+        _naming = false;
+        _newName = "";
+        try
+        {
+            using var response = await Http.PostAsJsonAsync("api/playlists", new PlaylistForm { Name = name });
+            if (!response.IsSuccessStatusCode)
+            {
+                _notice = await PlaylistRefusal.ReadAsync(response, "The Playlist couldn't be made.");
+                return;
+            }
+
+            await AddAsync((await response.Content.ReadFromJsonAsync<PlaylistSummary>())!);
+        }
+        catch (HttpRequestException)
+        {
+            _notice = "Something went wrong. Try again.";
+        }
+    }
+
+    private static string Tracks(int count) => count == 1 ? "1 Track" : $"{count} Tracks";
+}
