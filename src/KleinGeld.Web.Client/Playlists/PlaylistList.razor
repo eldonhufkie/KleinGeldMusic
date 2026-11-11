@@ -1,0 +1,46 @@
+@inject IPlaylistsState MyPlaylists
+@implements IDisposable
+
+@* The Member's Playlists as links, most recently changed first: on the Playlists page and as Your Playlists at home. *@
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+else if (MyPlaylists.Playlists.Count == 0)
+{
+    <p>No Playlists yet.</p>
+}
+else
+{
+    <ul class="playlist-list">
+        @foreach (var playlist in MyPlaylists.Playlists)
+        {
+            <li @key="playlist.Id">
+                <a href="playlists/@playlist.Id/@playlist.Slug">@playlist.Name</a>
+                <span>@playlist.TrackCount @(playlist.TrackCount == 1 ? "Track" : "Tracks")</span>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private bool _failed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        MyPlaylists.Changed += OnChanged;
+        try
+        {
+            await MyPlaylists.LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+
+    private void OnChanged() => StateHasChanged();
+
+    public void Dispose() => MyPlaylists.Changed -= OnChanged;
+}
