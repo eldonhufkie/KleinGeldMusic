@@ -104,4 +104,17 @@ internal static class MemberEmails
             "",
             "The Release stays Published as it was. You can change them under My Artists and submit them again.",
         ]));
+
+    /// <summary>Email 9: the Admin deleted a Release or Artist the Member manages, with the reason.</summary>
+    public static OutgoingEmail DeletedByAdmin(MailboxAddress manager, string what, string reason) =>
+        new(manager, $"{what} was deleted", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin deleted {what}:",
+            "",
+            reason,
+            "",
+            "It's gone for good, with its Tracks and covers.",
+        ]));
 }
