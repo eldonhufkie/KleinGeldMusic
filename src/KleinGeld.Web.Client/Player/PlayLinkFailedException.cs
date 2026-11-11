@@ -4,4 +4,4 @@ namespace KleinGeld.Web.Client.Player;
 /// No answer about a play link: the network, the server or the session failed. Unlike a refusal, this says nothing
 /// about whether the Track can still be played.
 /// </summary>
-public sealed class PlayLinkFailedException(string message, Exception? cause = null) : Exception(message, cause);
+public class PlayLinkFailedException(string message, Exception? cause = null) : Exception(message, cause);

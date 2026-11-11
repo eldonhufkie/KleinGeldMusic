@@ -17,6 +17,9 @@ public interface IAudioElement
     /// <summary>Raised when a Track plays to its end by itself.</summary>
     event Func<Task>? Ended;
 
+    /// <summary>Raised when the audio can't be loaded or stops loading, such as when its play link was revoked.</summary>
+    event Func<Task>? Failed;
+
     Task PlayAsync(string source);
 
     Task PauseAsync();

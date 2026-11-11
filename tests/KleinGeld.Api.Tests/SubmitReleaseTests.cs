@@ -120,7 +120,7 @@ public sealed partial class SubmitReleaseTests(KleinGeldApp app) : IAsyncLifetim
 
         using var second = await SubmitAsync(manager, release);
 
-        await AssertRefusedAsync(second, HttpStatusCode.Conflict, "Draft or Rejected");
+        await AssertRefusedAsync(second, HttpStatusCode.Conflict, "Only a Draft, Rejected or Taken down");
     }
 
     [Fact]

@@ -24,7 +24,7 @@ else
     {
         <p>
             <a href="my-artists/@_release.ArtistId">@_release.ArtistName</a>
-            <span class="stage-badge">@_release.Stage</span>
+            <span class="stage-badge">@StageLabel.For(_release.Stage)</span>
         </p>
         @if (_release.RejectionReason is not null)
         {
@@ -79,7 +79,7 @@ else
     {
         <p><a href="releases/@_release.Id/@_release.Slug">Open the Release page</a></p>
 
-        @if (_release.Stage is ReleaseStage.Draft or ReleaseStage.Rejected)
+        @if (_release.Stage is ReleaseStage.Draft or ReleaseStage.Rejected or ReleaseStage.TakenDown)
         {
             <h2>Submit</h2>
             <label><input type="checkbox" @bind="_rightsDeclared" /> @RightsDeclarationWording.Text</label>
@@ -112,6 +112,12 @@ else
             <h2>Submitted</h2>
             <p>This Release is waiting for the Admin's review and can't be changed. Withdraw it to edit it again.</p>
             <button type="button" disabled="@_busy" @onclick="WithdrawAsync">Withdraw</button>
+        }
+        else if (_release.Stage == ReleaseStage.Published)
+        {
+            <h2>Take down</h2>
+            <p>Hides this Release from other Members and stops any playback of it. You can resubmit it later.</p>
+            <button type="button" disabled="@_busy" @onclick="TakeDownAsync">Take down</button>
         }
 
         @if (_problem is not null)
@@ -191,6 +197,8 @@ else
     private Task WithdrawPendingChangesAsync() => ChangeStageAsync(() => Http.PostAsync($"api/releases/{Id}/pending-changes/withdraw", null));
 
     private Task WithdrawAsync() => ChangeStageAsync(() => Http.PostAsync($"api/releases/{Id}/withdraw", null));
+
+    private Task TakeDownAsync() => ChangeStageAsync(() => Http.PostAsync($"api/releases/{Id}/takedown", null));
 
     private async Task ChangeStageAsync(Func<Task<HttpResponseMessage>> send)
     {

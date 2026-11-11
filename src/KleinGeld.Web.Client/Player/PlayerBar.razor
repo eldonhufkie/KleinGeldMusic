@@ -1,6 +1,7 @@
 @implements IDisposable
 @inject PlayerService Player
 @inject JsAudioElement Audio
+@inject NavigationManager Navigation
 
 @*
     The one audio element and its controls. MainLayout keeps this outside @Body and outside AuthorizeView, which can
@@ -73,7 +74,11 @@
 
     private bool _queueOpen;
 
-    protected override void OnInitialized() => Player.Changed += Refresh;
+    protected override void OnInitialized()
+    {
+        Player.Changed += Refresh;
+        Player.SessionEnded += ToLogin;
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -84,7 +89,14 @@
         }
     }
 
-    public void Dispose() => Player.Changed -= Refresh;
+    public void Dispose()
+    {
+        Player.Changed -= Refresh;
+        Player.SessionEnded -= ToLogin;
+    }
+
+    private void ToLogin() => _ = InvokeAsync(() => Navigation.NavigateTo(
+        $"Account/Login?returnUrl={Uri.EscapeDataString(Navigation.Uri)}", forceLoad: true));
 
     private void Refresh() => _ = InvokeAsync(StateHasChanged);
 
