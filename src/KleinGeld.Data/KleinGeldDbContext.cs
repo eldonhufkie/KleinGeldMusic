@@ -18,6 +18,8 @@ public sealed class KleinGeldDbContext(DbContextOptions<KleinGeldDbContext> opti
 
     public DbSet<RightsDeclaration> RightsDeclarations => Set<RightsDeclaration>();
 
+    public DbSet<Playlist> Playlists => Set<Playlist>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -67,6 +69,24 @@ public sealed class KleinGeldDbContext(DbContextOptions<KleinGeldDbContext> opti
             track.Property(t => t.OriginalBlobName).HasMaxLength(200);
             track.Property(t => t.ConvertedBlobName).HasMaxLength(200);
             track.HasOne(t => t.Release).WithMany(r => r.Tracks).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<Playlist>(playlist =>
+        {
+            playlist.Property(p => p.Name).HasMaxLength(PlaylistForm.NameMaxLength);
+            playlist.Property(p => p.Slug).HasMaxLength(PlaylistForm.NameMaxLength);
+            playlist.HasOne<Member>().WithMany().HasForeignKey(p => p.MemberId).OnDelete(DeleteBehavior.Cascade);
+            playlist.HasIndex(p => new { p.MemberId, p.ChangedAt });
+        });
+
+        builder.Entity<PlaylistEntry>(entry =>
+        {
+            entry.Property(e => e.Title).HasMaxLength(ReleaseForm.TitleMaxLength);
+            entry.Property(e => e.ArtistName).HasMaxLength(ArtistForm.NameMaxLength);
+            entry.HasOne<Playlist>().WithMany(p => p.Entries).HasForeignKey(e => e.PlaylistId).OnDelete(DeleteBehavior.Cascade);
+            // The entry outlives its Track as an Unavailable Track.
+            entry.HasOne(e => e.Track).WithMany().HasForeignKey(e => e.TrackId).OnDelete(DeleteBehavior.SetNull);
+            entry.HasIndex(e => new { e.PlaylistId, e.TrackId }).IsUnique();
         });
     }
 }

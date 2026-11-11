@@ -1,0 +1,118 @@
+@page "/playlists/{Id:guid}/{Slug?}"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject PlayerService Player
+
+@* A Playlist as its Member sees it. Nobody else can open it. *@
+
+<PageTitle>@(_playlist?.Name ?? "Playlist") · KleinGeld Music</PageTitle>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+else if (_playlist is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <h1>@_playlist.Name</h1>
+    <p>
+        @_playlist.Tracks.Count @(_playlist.Tracks.Count == 1 ? "Track" : "Tracks")
+        · @_playlist.TotalDuration.ToString(_playlist.TotalDuration.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss")
+    </p>
+    <p>
+        <button type="button" disabled="@(!Playable.Any())" @onclick="PlayAsync">Play</button>
+        <button type="button" disabled="@(!Playable.Any())" @onclick="ShuffleAsync">Shuffle</button>
+    </p>
+
+    <ol class="release-tracks">
+        @for (var i = 0; i < _playlist.Tracks.Count; i++)
+        {
+            var track = _playlist.Tracks[i];
+            var number = i + 1;
+            @if (track.IsAvailable)
+            {
+                <li @key="track.TrackId" @onclick="() => PlayFromAsync(track)">
+                    <span>@number</span>
+                    <button type="button" aria-label="Play @track.Title">Play</button>
+                    <span class="release-track-title">
+                        @track.Title
+                        @if (track.FeaturedArtists is not null)
+                        {
+                            <span>feat. @track.FeaturedArtists</span>
+                        }
+                        <TrackBadges Track="@(new TrackSummary(track.TrackId!.Value, track.Title, 0, TrackStatus.Ready, track.SingleMark, Explicit: track.Explicit))" />
+                        <span @onclick:stopPropagation="true">
+                            <a href="artists/@track.ArtistId">@track.ArtistName</a>
+                            · <a href="releases/@track.ReleaseId/@track.ReleaseSlug">@track.ReleaseTitle</a>
+                        </span>
+                    </span>
+                    <span>@track.Duration?.ToString(@"m\:ss")</span>
+                    <TrackMenu Track="ToPlayerTrack(track)" />
+                </li>
+            }
+            else
+            {
+                <li @key="track.TrackId" class="unavailable">
+                    <span>@number</span>
+                    <span></span>
+                    <span class="release-track-title">@track.Title <span>@track.ArtistName</span> <span>Unavailable</span></span>
+                </li>
+            }
+        }
+    </ol>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [Parameter]
+    public string? Slug { get; set; }
+
+    private PlaylistDetails? _playlist;
+    private bool _failed;
+
+    private IEnumerable<PlaylistTrack> Playable => _playlist?.Tracks.Where(t => t.IsAvailable) ?? [];
+
+    private static PlayerTrack ToPlayerTrack(PlaylistTrack track) =>
+        new(track.TrackId!.Value, track.Title, track.ArtistName, track.IsAvailable);
+
+    private Task PlayAsync() => Player.PlayAsync(Playable.Select(ToPlayerTrack).ToList(), 0);
+
+    private async Task ShuffleAsync()
+    {
+        var tracks = Playable.Select(ToPlayerTrack).ToList();
+        Player.SetShuffle(true);
+        await Player.PlayAsync(tracks, Random.Shared.Next(tracks.Count));
+    }
+
+    private Task PlayFromAsync(PlaylistTrack track)
+    {
+        var tracks = Playable.ToList();
+        return Player.PlayAsync(tracks.Select(ToPlayerTrack).ToList(), tracks.IndexOf(track));
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _playlist = await Http.GetFromJsonAsync<PlaylistDetails>($"api/playlists/{Id}/{Slug}");
+            if (_playlist!.Slug != Slug)
+            {
+                Navigation.NavigateTo($"playlists/{_playlist.Id}/{_playlist.Slug}", replace: true);
+            }
+        }
+        catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.NotFound)
+        {
+            Navigation.NotFound();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+}

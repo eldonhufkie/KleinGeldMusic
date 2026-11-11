@@ -30,6 +30,7 @@ builder.AddEmailSender();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IManagedArtistsState, ServerManagedArtistsState>();
+builder.Services.AddScoped<KleinGeld.Web.Client.Playlists.IPlaylistsState, ServerPlaylistsState>();
 builder.Services.AddScoped<KleinGeld.Web.Client.Artists.IReviewCountState, ServerReviewCountState>();
 builder.Services.AddScoped<KleinGeld.Web.Client.Player.IPlayLinkSource, ServerPlayLinkSource>();
 KleinGeld.Web.Client.Player.PlayerRegistration.AddPlayer(builder.Services);
@@ -71,6 +72,7 @@ app.MapGroup("/api").RequireAuthorization().MapReleaseListEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapTrackEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapCoverEndpoints();
 app.MapGroup("/api").RequireAuthorization().MapSubmissionEndpoints();
+app.MapGroup("/api").RequireAuthorization().MapPlaylistEndpoints();
 var adminApi = app.MapGroup("/api/admin").RequireAuthorization(admin => admin.RequireRole(Roles.Admin));
 adminApi.MapAdminJoinRequestEndpoints();
 adminApi.MapAdminMemberEndpoints();

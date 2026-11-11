@@ -171,6 +171,70 @@ namespace KleinGeld.Data.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("KleinGeld.Data.Playlist", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ChangedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId", "ChangedAt");
+
+                    b.ToTable("Playlists");
+                });
+
+            modelBuilder.Entity("KleinGeld.Data.PlaylistEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ArtistName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("PlaylistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid?>("TrackId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TrackId");
+
+                    b.HasIndex("PlaylistId", "TrackId")
+                        .IsUnique();
+
+                    b.ToTable("PlaylistEntry");
+                });
+
             modelBuilder.Entity("KleinGeld.Data.Release", b =>
                 {
                     b.Property<Guid>("Id")
@@ -488,6 +552,31 @@ namespace KleinGeld.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KleinGeld.Data.Playlist", b =>
+                {
+                    b.HasOne("KleinGeld.Data.Member", null)
+                        .WithMany()
+                        .HasForeignKey("MemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KleinGeld.Data.PlaylistEntry", b =>
+                {
+                    b.HasOne("KleinGeld.Data.Playlist", null)
+                        .WithMany("Entries")
+                        .HasForeignKey("PlaylistId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KleinGeld.Data.Track", "Track")
+                        .WithMany()
+                        .HasForeignKey("TrackId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Track");
+                });
+
             modelBuilder.Entity("KleinGeld.Data.Release", b =>
                 {
                     b.HasOne("KleinGeld.Data.Artist", "Artist")
@@ -629,6 +718,11 @@ namespace KleinGeld.Data.Migrations
             modelBuilder.Entity("KleinGeld.Data.Artist", b =>
                 {
                     b.Navigation("Releases");
+                });
+
+            modelBuilder.Entity("KleinGeld.Data.Playlist", b =>
+                {
+                    b.Navigation("Entries");
                 });
 
             modelBuilder.Entity("KleinGeld.Data.Release", b =>

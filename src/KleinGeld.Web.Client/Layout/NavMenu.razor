@@ -1,6 +1,7 @@
 @implements IDisposable
 @inject IManagedArtistsState ManagedArtists
 @inject IReviewCountState ReviewCount
+@inject IPlaylistsState MyPlaylists
 @inject NavigationManager Navigation
 
 @* Both navs are always rendered and app.css shows one: the sidebar, or below 700px the tab bar. *@
@@ -10,11 +11,19 @@
     <NavLink href="" Match="NavLinkMatch.All">Home</NavLink>
     <NavLink href="releases">Releases</NavLink>
     @MemberLinks
+    <NavLink href="playlists" Match="NavLinkMatch.All">Playlists</NavLink>
+    <div class="sidebar-playlists">
+        @foreach (var playlist in MyPlaylists.Playlists)
+        {
+            <NavLink href="@($"playlists/{playlist.Id}/{playlist.Slug}")">@playlist.Name</NavLink>
+        }
+    </div>
 </nav>
 
 <nav class="tab-bar" aria-label="Tabs">
     <NavLink href="" Match="NavLinkMatch.All">Home</NavLink>
     <NavLink href="releases">Releases</NavLink>
+    <NavLink href="playlists">Playlists</NavLink>
     @* Keyed on the navigation count: a new element is a closed one, so More folds away once a link in it is followed. *@
     <details class="tab-more" @key="_navigations">
         <summary>More</summary>
@@ -50,11 +59,13 @@
     {
         ManagedArtists.Changed += OnChanged;
         ReviewCount.Changed += OnChanged;
+        MyPlaylists.Changed += OnChanged;
         Navigation.LocationChanged += OnLocationChanged;
         try
         {
             await ManagedArtists.LoadAsync();
             await ReviewCount.LoadAsync();
+            await MyPlaylists.LoadAsync();
         }
         catch (HttpRequestException)
         {
@@ -74,6 +85,7 @@
     {
         ManagedArtists.Changed -= OnChanged;
         ReviewCount.Changed -= OnChanged;
+        MyPlaylists.Changed -= OnChanged;
         Navigation.LocationChanged -= OnLocationChanged;
     }
 }
