@@ -56,6 +56,11 @@ else
         </AuthorizeView>
     }
 
+    @if (_release.Stage == ReleaseStage.Published)
+    {
+        <p><AddReleaseMenu ReleaseId="_release.Id" /></p>
+    }
+
     <ol class="release-tracks">
         @foreach (var track in _tracks)
         {

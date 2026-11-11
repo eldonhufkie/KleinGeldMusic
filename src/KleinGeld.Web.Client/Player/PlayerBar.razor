@@ -53,6 +53,10 @@
                         var track = queue[index];
                         <li aria-current="@(index == Player.CurrentIndex ? "true" : null)">
                             <span class="queue-track">@track.Title · @track.Artist</span>
+                            @if (track.IsAvailable)
+                            {
+                                <TrackMenu Track="track" />
+                            }
                             @if (index != Player.CurrentIndex)
                             {
                                 <button type="button" aria-label="Remove @track.Title from the Queue"

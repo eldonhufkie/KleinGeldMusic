@@ -14,10 +14,18 @@ internal static class PlaylistEndpoints
     {
         api.MapPost("/playlists", async (PlaylistForm form, ClaimsPrincipal caller, KleinGeldDbContext db, TimeProvider clock) =>
         {
+            var memberId = caller.MemberId();
+            if (await db.Playlists.CountAsync(p => p.MemberId == memberId) >= MaxPlaylists)
+            {
+                return Results.Problem(
+                    $"You can have at most {MaxPlaylists} Playlists. Delete one to make a new one.",
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
             var name = form.Name.Trim();
             var playlist = new Playlist
             {
-                MemberId = caller.MemberId(),
+                MemberId = memberId,
                 Name = name,
                 Slug = Slugs.From(name),
                 ChangedAt = clock.GetUtcNow(),
@@ -113,6 +121,10 @@ internal static class PlaylistEndpoints
             {
                 return Results.Problem($"Already on {playlist.Name}.", statusCode: StatusCodes.Status409Conflict);
             }
+            if (playlist.Entries.Count >= MaxTracks)
+            {
+                return TooManyTracks();
+            }
 
             // Added explicitly: the key is set client-side, so via the navigation EF would take it for an existing row.
             db.Add(new PlaylistEntry
@@ -136,7 +148,75 @@ internal static class PlaylistEndpoints
 
             return Results.Ok(ToSummary(playlist, playlist.Entries.Count));
         });
+
+        api.MapPost("/playlists/{id:guid}/releases", async (
+            Guid id, AddReleaseToPlaylistForm form, ClaimsPrincipal caller, KleinGeldDbContext db, TimeProvider clock) =>
+        {
+            var memberId = caller.MemberId();
+            var playlist = await db.Playlists
+                .Include(p => p.Entries)
+                .SingleOrDefaultAsync(p => p.Id == id && p.MemberId == memberId);
+            var release = await db.Releases
+                .VisibleTo(caller)
+                .Where(r => r.Id == form.ReleaseId)
+                .Select(r => new
+                {
+                    ArtistName = r.Artist.Name,
+                    Tracks = r.Tracks.OrderBy(t => t.Position).Select(t => new { t.Id, t.Title }).ToList(),
+                })
+                .SingleOrDefaultAsync();
+            if (playlist is null || release is null)
+            {
+                return Results.NotFound();
+            }
+
+            var onPlaylist = playlist.Entries.Select(e => e.TrackId).ToHashSet();
+            var missing = release.Tracks.Where(t => !onPlaylist.Contains(t.Id)).ToList();
+            if (playlist.Entries.Count + missing.Count > MaxTracks)
+            {
+                return TooManyTracks();
+            }
+
+            var position = playlist.Entries.Count;
+            foreach (var track in missing)
+            {
+                db.Add(new PlaylistEntry
+                {
+                    PlaylistId = playlist.Id,
+                    TrackId = track.Id,
+                    Position = ++position,
+                    Title = track.Title,
+                    ArtistName = release.ArtistName,
+                });
+            }
+            if (missing.Count > 0)
+            {
+                playlist.ChangedAt = clock.GetUtcNow();
+                try
+                {
+                    await db.SaveChangesAsync();
+                }
+                catch (DbUpdateException)
+                {
+                    return Results.Problem(
+                        "The Playlist changed at the same time. Try again.", statusCode: StatusCodes.Status409Conflict);
+                }
+            }
+
+            return Results.Ok(new AddReleaseToPlaylistResult(
+                missing.Count, release.Tracks.Count - missing.Count, ToSummary(playlist, position)));
+        });
     }
+
+    /// <summary>The most Playlists one Member may have.</summary>
+    public const int MaxPlaylists = 100;
+
+    /// <summary>The most Tracks one Playlist may hold.</summary>
+    public const int MaxTracks = 1000;
+
+    private static IResult TooManyTracks() =>
+        Results.Problem(
+            $"A Playlist can have at most {MaxTracks.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} Tracks.", statusCode: StatusCodes.Status409Conflict);
 
     private static PlaylistSummary ToSummary(Playlist playlist, int trackCount) =>
         new(playlist.Id, playlist.Name, playlist.Slug, trackCount, playlist.ChangedAt);

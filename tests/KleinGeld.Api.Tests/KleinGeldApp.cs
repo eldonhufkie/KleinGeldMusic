@@ -90,6 +90,14 @@ public sealed class KleinGeldApp : IAsyncLifetime
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>Puts this many Unavailable Tracks on a Playlist, which adding one by one would take too long for.</summary>
+    public async Task FillPlaylistAsync(Guid playlistId, int count)
+    {
+        using var client = CreateWebClient();
+        using var response = await client.PostAsJsonAsync($"/testing/playlists/{playlistId}/filler", count);
+        response.EnsureSuccessStatusCode();
+    }
+
     /// <summary>The reason as stored, which the API only shows while the Release is Rejected.</summary>
     public async Task<string?> ReadStoredRejectionReasonAsync(Guid releaseId)
     {

@@ -191,6 +191,82 @@ public sealed partial class SubmitReleaseTests
         Assert.DoesNotContain(theirs.Name, sidebar);
     }
 
+    [Fact]
+    public async Task Adding_a_whole_Release_appends_its_missing_Tracks_in_order_and_reports_the_skipped()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreateReleaseAsync(manager, await CreateArtistAsync(manager), ReleaseType.EP, new DateOnly(2024, 3, 1));
+        await SetCoverAsync(manager, release);
+        await WaitUntilConvertedAsync(manager, release, await AddTrackAsync(manager, release, "tone.flac"));
+        await WaitUntilConvertedAsync(manager, release, await AddTrackAsync(manager, release, "tone.mp3"));
+        await WaitUntilConvertedAsync(manager, release, await AddTrackAsync(manager, release, "tone.flac"));
+        using (await SubmitAsync(manager, release))
+        using (await ApproveAsync(admin, release))
+        {
+        }
+        var tracks = await ReadTracksAsync(manager, release);
+        var playlist = await CreatePlaylistAsync(manager, "Heel");
+        using var already = await AddToPlaylistAsync(manager, playlist, tracks[1]);
+
+        using var response = await manager.PostAsJsonAsync(
+            $"/api/playlists/{playlist.Id}/releases", new AddReleaseToPlaylistForm { ReleaseId = release.Id });
+        var result = await response.Content.ReadFromJsonAsync<AddReleaseToPlaylistResult>();
+        var page = await ReadPlaylistAsync(manager, playlist);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(2, result!.Added);
+        Assert.Equal(1, result.Skipped);
+        Assert.Equal([tracks[1].Id, tracks[0].Id, tracks[2].Id], page.Tracks.Select(t => t.TrackId));
+    }
+
+    [Fact]
+    public async Task A_Release_the_Member_cannot_see_cannot_be_added()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var listener = await app.LoginAsNewMemberAsync();
+        var draft = await CreateCompleteDraftAsync(manager);
+        var playlist = await CreatePlaylistAsync(listener, "Stiekem");
+
+        using var response = await listener.PostAsJsonAsync(
+            $"/api/playlists/{playlist.Id}/releases", new AddReleaseToPlaylistForm { ReleaseId = draft.Id });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Member_has_at_most_100_Playlists()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+        for (var i = 0; i < 100; i++)
+        {
+            await CreatePlaylistAsync(member, $"Lijst {i}");
+        }
+
+        using var response = await member.PostAsJsonAsync("/api/playlists", new PlaylistForm { Name = "Eén te veel" });
+
+        await AssertRefusedAsync(response, HttpStatusCode.Conflict, "at most 100 Playlists");
+    }
+
+    [Fact]
+    public async Task A_Playlist_has_at_most_1000_Tracks()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await PublishAsync(manager, admin, await CreateArtistAsync(manager), ReleaseType.Single, new DateOnly(2024, 1, 1));
+        var track = (await ReadTracksAsync(manager, release))[0];
+        var playlist = await CreatePlaylistAsync(manager, "Vol");
+        await app.FillPlaylistAsync(playlist.Id, 1000);
+
+        using var one = await AddToPlaylistAsync(manager, playlist, track);
+        using var whole = await manager.PostAsJsonAsync(
+            $"/api/playlists/{playlist.Id}/releases", new AddReleaseToPlaylistForm { ReleaseId = release.Id });
+
+        await AssertRefusedAsync(one, HttpStatusCode.Conflict, "at most 1,000 Tracks");
+        await AssertRefusedAsync(whole, HttpStatusCode.Conflict, "at most 1,000 Tracks");
+        Assert.Equal(1000, (await ReadPlaylistAsync(manager, playlist)).Tracks.Count);
+    }
+
     private static async Task<PlaylistSummary> CreatePlaylistAsync(HttpClient member, string name)
     {
         using var response = await member.PostAsJsonAsync("/api/playlists", new PlaylistForm { Name = name });
