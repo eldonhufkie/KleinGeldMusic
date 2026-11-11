@@ -97,10 +97,12 @@
     [Parameter, EditorRequired]
     public Guid ReleaseId { get; set; }
 
-    /// <summary>A file was accepted, so its tags may have filled details of the Release.</summary>
-    /// <summary>Raised after a Track is confirmed or removed, which may change the Release or its Pending Changes.</summary>
+    /// <summary>
+    /// Raised after any change to the Tracks, which may change the Release (tags fill its details) or start or end
+    /// its Pending Changes, so the editor reloads it.
+    /// </summary>
     [Parameter]
-    public EventCallback OnConfirmed { get; set; }
+    public EventCallback OnChanged { get; set; }
 
     /// <summary>A Published Release's own Tracks can be removed or get new audio as Pending Changes.</summary>
     [Parameter]
@@ -221,6 +223,7 @@
                 _messages.Add(problem?.Detail ?? "That couldn't be saved. Reload the page and try again.");
             }
             await LoadAsync();
+            await OnChanged.InvokeAsync();
         }
         catch (HttpRequestException)
         {
@@ -275,6 +278,7 @@
             }
             _replacing = null;
             await LoadAsync();
+            await OnChanged.InvokeAsync();
         }
         catch (HttpRequestException)
         {
@@ -314,6 +318,8 @@
                 await UploadAsync(index, files[index]);
             }
             await BlobUpload.ClearAsync(JS, _input);
+            // Even a failed upload may have started Pending Changes on a Published Release.
+            await OnChanged.InvokeAsync();
         }
         catch (HttpRequestException)
         {
@@ -374,7 +380,6 @@
         {
             _messages.Add($"{file.Name}: {note}");
         }
-        await OnConfirmed.InvokeAsync();
     }
 
     private async Task ReportAsync(BlobUpload.ChosenFile file, HttpResponseMessage response)
@@ -397,7 +402,7 @@
         {
             using var _ = await Http.DeleteAsync($"api/releases/{ReleaseId}/tracks/{track.Id}");
             await LoadAsync();
-            await OnConfirmed.InvokeAsync();
+            await OnChanged.InvokeAsync();
         }
         catch (HttpRequestException)
         {
