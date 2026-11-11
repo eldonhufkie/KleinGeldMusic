@@ -65,11 +65,12 @@ internal static class PlaylistEndpoints
                     Track = e.Track == null ? null : new
                     {
                         e.Track.Title,
-                        e.Track.Duration,
+                        // A replaced Track plays its live audio for Members until the Pending Changes are approved.
+                        Duration = e.Track.LiveConvertedBlobName != null ? e.Track.LiveDuration : e.Track.Duration,
                         e.Track.SingleMark,
                         e.Track.FeaturedArtists,
                         e.Track.Explicit,
-                        e.Track.Status,
+                        Ready = e.Track.LiveConvertedBlobName != null || e.Track.Status == TrackStatus.Ready,
                         e.Track.Release.ArtistId,
                         ArtistName = e.Track.Release.Artist.Name,
                         ReleaseId = e.Track.Release.Id,
@@ -83,7 +84,7 @@ internal static class PlaylistEndpoints
             var tracks = entries
                 .Select(e => e.Track is { Published: true } t
                     ? new PlaylistTrack(
-                        e.TrackId, t.Title, t.ArtistName, t.Status == TrackStatus.Ready, t.ArtistId, t.ReleaseId,
+                        e.TrackId, t.Title, t.ArtistName, t.Ready, t.ArtistId, t.ReleaseId,
                         t.ReleaseTitle, t.ReleaseSlug, t.Duration, t.SingleMark, t.FeaturedArtists, t.Explicit)
                     : new PlaylistTrack(e.TrackId, e.Title, e.ArtistName, IsAvailable: false))
                 .ToList();

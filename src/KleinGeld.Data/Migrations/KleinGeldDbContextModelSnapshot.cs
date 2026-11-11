@@ -350,12 +350,26 @@ namespace KleinGeld.Data.Migrations
                     b.Property<bool>("IsReplacingFailedAudio")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("LiveConvertedBlobName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<TimeSpan?>("LiveDuration")
+                        .HasColumnType("interval");
+
+                    b.Property<string>("LiveOriginalBlobName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<string>("OriginalBlobName")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
                     b.Property<bool>("Pending")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("PendingRemoval")
                         .HasColumnType("boolean");
 
                     b.Property<int>("Position")

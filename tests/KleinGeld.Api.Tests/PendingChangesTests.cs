@@ -136,12 +136,198 @@ public sealed partial class SubmitReleaseTests
         var live = (await ReadTracksAsync(manager, release)).Single();
         var added = await AddTrackAsync(manager, release, "tone.mp3");
 
-        using var removeLive = await manager.DeleteAsync($"/api/releases/{release.Id}/tracks/{live.Id}");
         using var removeAdded = await manager.DeleteAsync($"/api/releases/{release.Id}/tracks/{added.Track.Id}");
 
-        Assert.Equal(HttpStatusCode.Conflict, removeLive.StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, removeAdded.StatusCode);
         Assert.Null(await ReadPendingChangesAsync(manager, release));
+        Assert.Equal(live.Id, (await ReadTracksAsync(manager, release)).Single().Id);
+    }
+
+    [Fact]
+    public async Task Replacing_a_Published_Tracks_audio_keeps_the_Track_and_Members_hear_the_old_audio_until_approval()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var otherMember = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreatePublishedAsync(manager, admin);
+        var track = (await ReadTracksAsync(manager, release)).Single();
+        var oldAudio = await PlayedBlobAsync(otherMember, track.Id);
+
+        var replacement = await ReplaceAudioAsync(manager, release, track.Id, "tone.flac");
+        await WaitUntilConvertedAsync(manager, release, replacement);
+
+        Assert.Equal(track.Id, replacement.Track.Id);
+        Assert.Equal(ReleaseStage.Draft, await ReadPendingChangesAsync(manager, release));
+        Assert.Equal(oldAudio, await PlayedBlobAsync(otherMember, track.Id));
+        var memberView = (await ReadTracksAsync(otherMember, release)).Single();
+        Assert.Equal(TrackStatus.Ready, memberView.Status);
+        Assert.False(memberView.Replaced);
+        Assert.True((await ReadTracksAsync(manager, release)).Single().Replaced);
+        var newAudio = await PlayedBlobAsync(admin, track.Id);
+        Assert.NotEqual(oldAudio, newAudio);
+        Assert.Equal(oldAudio, await PlayedBlobAsync(admin, track.Id, old: true));
+        Assert.Equal(newAudio, await PlayedBlobAsync(manager, track.Id));
+        Assert.Equal(oldAudio, await PlayedBlobAsync(otherMember, track.Id, old: true));
+    }
+
+    [Fact]
+    public async Task Removing_a_Published_Track_is_a_Pending_Change_that_Members_dont_notice_until_approval()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var otherMember = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreatePublishedAsync(manager, admin);
+        var kept = (await ReadTracksAsync(manager, release)).Single();
+        var gone = await AddApprovedTrackAsync(manager, admin, release);
+
+        using var removed = await manager.DeleteAsync($"/api/releases/{release.Id}/tracks/{gone.Track.Id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+        Assert.Equal(ReleaseStage.Draft, await ReadPendingChangesAsync(manager, release));
+        Assert.Equal(2, (await ReadTracksAsync(otherMember, release)).Count);
+        Assert.All(await ReadTracksAsync(otherMember, release), t => Assert.False(t.Removed));
+        Assert.True((await ReadTracksAsync(manager, release)).Single(t => t.Id == gone.Track.Id).Removed);
+        using var stillPlays = await otherMember.GetAsync($"/api/tracks/{gone.Track.Id}/play-link");
+        Assert.Equal(HttpStatusCode.OK, stillPlays.StatusCode);
+        Assert.Equal(kept.Id, (await ReadTracksAsync(manager, release)).Single(t => !t.Removed).Id);
+    }
+
+    [Fact]
+    public async Task The_Review_page_shows_removed_and_replaced_Tracks()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreatePublishedAsync(manager, admin);
+        var replaced = (await ReadTracksAsync(manager, release)).Single();
+        var gone = await AddApprovedTrackAsync(manager, admin, release);
+        await WaitUntilConvertedAsync(manager, release, await ReplaceAudioAsync(manager, release, replaced.Id, "tone.flac"));
+        (await manager.DeleteAsync($"/api/releases/{release.Id}/tracks/{gone.Track.Id}")).Dispose();
+
+        using var submitted = await SubmitPendingChangesAsync(manager, release);
+
+        Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        var review = Assert.Single(await ReadReviewAsync(admin), r => r.Id == release.Id);
+        Assert.True(review.IsPendingChanges);
+        Assert.Empty(review.AddedTracks!);
+        Assert.Equal(gone.Track.Id, Assert.Single(review.RemovedTracks!).Id);
+        Assert.Equal(replaced.Id, Assert.Single(review.ReplacedTracks!).Id);
+    }
+
+    [Fact]
+    public async Task Approving_removes_Tracks_and_old_audio_for_Members_and_revokes_their_links()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var otherMember = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreatePublishedAsync(manager, admin);
+        var replaced = (await ReadTracksAsync(manager, release)).Single();
+        var gone = await AddApprovedTrackAsync(manager, admin, release);
+        var oldLink = await otherMember.GetFromJsonAsync<PlayLink>($"/api/tracks/{replaced.Id}/play-link");
+        var goneLink = await otherMember.GetFromJsonAsync<PlayLink>($"/api/tracks/{gone.Track.Id}/play-link");
+        await WaitUntilConvertedAsync(manager, release, await ReplaceAudioAsync(manager, release, replaced.Id, "tone.flac"));
+        var newAudio = await PlayedBlobAsync(manager, replaced.Id);
+        (await manager.DeleteAsync($"/api/releases/{release.Id}/tracks/{gone.Track.Id}")).Dispose();
+        (await SubmitPendingChangesAsync(manager, release)).Dispose();
+
+        using var approved = await ApproveAsync(admin, release);
+
+        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+        Assert.Null(await ReadPendingChangesAsync(manager, release));
+        var track = Assert.Single(await ReadTracksAsync(otherMember, release));
+        Assert.Equal(replaced.Id, track.Id);
+        Assert.Equal(1, track.Position);
+        Assert.Equal(newAudio, await PlayedBlobAsync(otherMember, replaced.Id));
+        using var goneRefused = await otherMember.GetAsync($"/api/tracks/{gone.Track.Id}/play-link");
+        Assert.Equal(HttpStatusCode.NotFound, goneRefused.StatusCode);
+        using var oldRevoked = await BlobStorage.GetAsync(oldLink!.Url);
+        using var goneRevoked = await BlobStorage.GetAsync(goneLink!.Url);
+        Assert.NotEqual(HttpStatusCode.OK, oldRevoked.StatusCode);
+        Assert.NotEqual(HttpStatusCode.OK, goneRevoked.StatusCode);
+    }
+
+    [Fact]
+    public async Task Pending_Changes_can_be_Withdrawn_to_Draft_and_stay_editable_when_Rejected()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreatePublishedAsync(manager, admin);
+        var track = (await ReadTracksAsync(manager, release)).Single();
+        await WaitUntilConvertedAsync(manager, release, await ReplaceAudioAsync(manager, release, track.Id, "tone.flac"));
+        (await SubmitPendingChangesAsync(manager, release)).Dispose();
+
+        using var withdrawn = await manager.PostAsync($"/api/releases/{release.Id}/pending-changes/withdraw", null);
+
+        Assert.Equal(HttpStatusCode.OK, withdrawn.StatusCode);
+        Assert.Equal(ReleaseStage.Draft, await ReadPendingChangesAsync(manager, release));
+        (await SubmitPendingChangesAsync(manager, release)).Dispose();
+        (await admin.PostAsJsonAsync($"/api/admin/review/releases/{release.Id}/reject", new RejectForm { Reason = "Ruis." })).Dispose();
+        var again = await ReplaceAudioAsync(manager, release, track.Id, "tone.mp3");
+        Assert.Equal(TrackStatus.Ready, await WaitUntilConvertedAsync(manager, release, again));
+        Assert.Equal(ReleaseStage.Rejected, await ReadPendingChangesAsync(manager, release));
+        using var resubmitted = await SubmitPendingChangesAsync(manager, release);
+        Assert.Equal(HttpStatusCode.OK, resubmitted.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Takedown_folds_the_Pending_Changes_into_the_Release_for_whole_review_on_resubmission()
+    {
+        using var manager = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreatePublishedAsync(manager, admin);
+        var replaced = (await ReadTracksAsync(manager, release)).Single();
+        var gone = await AddApprovedTrackAsync(manager, admin, release);
+        await WaitUntilConvertedAsync(manager, release, await ReplaceAudioAsync(manager, release, replaced.Id, "tone.flac"));
+        var newAudio = await PlayedBlobAsync(manager, replaced.Id);
+        (await manager.DeleteAsync($"/api/releases/{release.Id}/tracks/{gone.Track.Id}")).Dispose();
+        var added = await AddTrackAsync(manager, release, "tone.mp3");
+        await WaitUntilConvertedAsync(manager, release, added);
+        (await SubmitPendingChangesAsync(manager, release)).Dispose();
+
+        using var takenDown = await TakeDownAsync(manager, release);
+
+        Assert.Equal(HttpStatusCode.OK, takenDown.StatusCode);
+        Assert.Null(await ReadPendingChangesAsync(manager, release));
+        Assert.DoesNotContain(await ReadReviewAsync(admin), r => r.Id == release.Id);
+        var tracks = await ReadTracksAsync(manager, release);
+        Assert.Equal([replaced.Id, added.Track.Id], tracks.OrderBy(t => t.Position).Select(t => t.Id));
+        Assert.All(tracks, t => Assert.False(t.Pending || t.Removed || t.Replaced));
+        Assert.Equal(newAudio, await PlayedBlobAsync(manager, replaced.Id));
+        using var resubmitted = await SubmitAsync(manager, release);
+        Assert.Equal(HttpStatusCode.OK, resubmitted.StatusCode);
+        var review = Assert.Single(await ReadReviewAsync(admin), r => r.Id == release.Id);
+        Assert.False(review.IsPendingChanges);
+    }
+
+    /// <summary>Adds a Track as Pending Changes and has the Admin approve it, so it is one of the Release's own.</summary>
+    private async Task<TrackUpload> AddApprovedTrackAsync(HttpClient manager, HttpClient admin, ReleaseDetails release)
+    {
+        var added = await AddTrackAsync(manager, release, "tone.mp3");
+        await WaitUntilConvertedAsync(manager, release, added);
+        using var submitted = await SubmitPendingChangesAsync(manager, release);
+        Assert.Equal(HttpStatusCode.OK, submitted.StatusCode);
+        using var approved = await ApproveAsync(admin, release);
+        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+        return added;
+    }
+
+    private static async Task<TrackUpload> ReplaceAudioAsync(HttpClient manager, ReleaseDetails release, Guid trackId, string fixture)
+    {
+        var file = await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "Fixtures", fixture));
+        using var response = await manager.PostAsJsonAsync(
+            $"/api/releases/{release.Id}/tracks/{trackId}/replace", new TrackUploadForm { FileName = fixture, Size = file.Length });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var upload = (await response.Content.ReadFromJsonAsync<TrackUpload>())!;
+        await PutBlobAsync(upload.UploadLink, file);
+        using var confirmed = await manager.PostAsync($"/api/releases/{release.Id}/tracks/{trackId}/confirm", null);
+        Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
+        return upload;
+    }
+
+    /// <summary>The blob a play link reads: its path is the container, then the blob name.</summary>
+    private static async Task<string> PlayedBlobAsync(HttpClient member, Guid trackId, bool old = false)
+    {
+        var link = await member.GetFromJsonAsync<PlayLink>($"/api/tracks/{trackId}/play-link{(old ? "?old=true" : "")}");
+        return Uri.UnescapeDataString(link!.Url.AbsolutePath).Split("/audio/")[1];
     }
 
     private async Task<ReleaseDetails> CreatePublishedAsync(HttpClient manager, HttpClient admin, string title = "Al Uitgebracht")

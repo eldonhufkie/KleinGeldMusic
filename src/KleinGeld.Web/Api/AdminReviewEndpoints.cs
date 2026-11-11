@@ -20,7 +20,7 @@ internal static class AdminReviewEndpoints
             var releases = await db.Releases
                 .Include(r => r.Artist)
                 .Include(r => r.RightsDeclarations)
-                .Include(r => r.Tracks.Where(t => t.Pending))
+                .Include(r => r.Tracks.Where(t => t.Pending || t.PendingRemoval || t.LiveConvertedBlobName != null))
                 .Where(AwaitsReview)
                 .ToListAsync();
 
@@ -35,13 +35,14 @@ internal static class AdminReviewEndpoints
                         .Select(d => new MadeRightsDeclaration(
                             d.MemberId is { } id ? names.GetValueOrDefault(id) : null, d.MadeAt, d.WordingVersion))
                         .ToList();
-                    // For Pending Changes the Admin reviews only what changed: the added Tracks.
+                    // For Pending Changes the Admin reviews only what changed: the added, removed and replaced Tracks.
                     var isPendingChanges = r.Stage == ReleaseStage.Published;
-                    var addedTracks = isPendingChanges
-                        ? r.Tracks.OrderBy(t => t.Position).Select(TrackEndpoints.ToSummary).ToList()
+                    List<TrackSummary>? Changed(Func<Track, bool> change) => isPendingChanges
+                        ? r.Tracks.Where(change).OrderBy(t => t.Position).Select(TrackEndpoints.ToSummary).ToList()
                         : null;
                     return new ReviewRelease(
-                        r.Id, r.Title, r.Slug, r.Artist.Name, r.Type, declarations[0].MadeAt, declarations, isPendingChanges, addedTracks);
+                        r.Id, r.Title, r.Slug, r.Artist.Name, r.Type, declarations[0].MadeAt, declarations, isPendingChanges,
+                        Changed(t => t.Pending), Changed(t => t.PendingRemoval), Changed(t => t.IsReplaced));
                 })
                 .OrderBy(r => r.SubmittedAt)
                 .ToList();
@@ -54,20 +55,19 @@ internal static class AdminReviewEndpoints
             TimeProvider clock,
             UserManager<Member> members,
             EmailSender emails,
-            ILoggerFactory loggers) =>
+            ILoggerFactory loggers,
+            PlayLinks links,
+            BlobLinks blobs) =>
         {
             Release? approved = null;
             var mergedPendingChanges = false;
+            IReadOnlyList<string> unusedBlobs = [];
             var refused = await db.WithReviewedReleaseLockedAsync(id, async release =>
             {
-                // Approving Pending Changes merges their Tracks into the Release, which stays Published as before.
+                // Approving Pending Changes merges them into the Release, which stays Published as before.
                 if (release.PendingChanges == ReleaseStage.Submitted)
                 {
-                    foreach (var track in release.Tracks)
-                    {
-                        track.Pending = false;
-                    }
-                    release.PendingChanges = null;
+                    unusedBlobs = release.MergePendingChanges();
                     await db.SaveChangesAsync();
                     approved = release;
                     mergedPendingChanges = true;
@@ -87,6 +87,16 @@ internal static class AdminReviewEndpoints
             if (refused is not null)
             {
                 return refused;
+            }
+
+            // Removed Tracks and replaced audio stop playing for Members: revoke the links they hold, then delete.
+            if (unusedBlobs.Count > 0)
+            {
+                await links.RevokeAllAsync();
+                foreach (var blobName in unusedBlobs)
+                {
+                    await blobs.Blob(Track.AudioContainer, blobName).DeleteIfExistsAsync();
+                }
             }
 
             // The Release is Published whatever happens here: Members can already play it even if the email fails.
