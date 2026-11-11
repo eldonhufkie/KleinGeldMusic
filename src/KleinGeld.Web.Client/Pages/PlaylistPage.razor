@@ -181,8 +181,13 @@ else
             var response = await Http.DeleteAsync($"api/playlists/{Id}/entries/{track.EntryId}");
             if (response.IsSuccessStatusCode)
             {
-                _removed = await response.Content.ReadFromJsonAsync<RemovedPlaylistEntry>();
-                _ = HideUndoLaterAsync();
+                var removed = await response.Content.ReadFromJsonAsync<RemovedPlaylistEntry>();
+                // A Track that no longer exists can't be put back, so there's nothing to Undo.
+                if (removed?.TrackId is not null)
+                {
+                    _removed = removed;
+                    _ = HideUndoLaterAsync();
+                }
             }
             return response;
         });

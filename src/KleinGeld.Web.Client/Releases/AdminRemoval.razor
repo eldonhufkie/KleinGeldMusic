@@ -1,0 +1,87 @@
+@inject HttpClient Http
+
+@* One Admin action that pulls content (Reject a Published Release, or delete a Release or an Artist), always with a
+   reason the Artist's managing Members will read. Only shown to the Admin. *@
+
+<AuthorizeView Roles="@Roles.Admin">
+    @if (_open)
+    {
+        <label for="@_reasonId">@Question The Artist's managers will read this.</label>
+        <textarea id="@_reasonId" rows="4" maxlength="@RejectForm.ReasonMaxLength" @bind="_reason" @bind:event="oninput"></textarea>
+        <div class="join-request-actions">
+            <button type="button" disabled="@(_busy || string.IsNullOrWhiteSpace(_reason))" @onclick="SendAsync">
+                @(_busy ? Busy : Action)
+            </button>
+            <button type="button" disabled="@_busy" @onclick="() => _open = false">Cancel</button>
+        </div>
+    }
+    else
+    {
+        <div class="join-request-actions">
+            <button type="button" @onclick="Open">@Action</button>
+        </div>
+    }
+    @if (_failed)
+    {
+        <p role="alert">That didn't work. Reload the page and try again.</p>
+    }
+</AuthorizeView>
+
+@code {
+    /// <summary>The button text, such as "Reject" or "Delete Release".</summary>
+    [Parameter, EditorRequired]
+    public string Action { get; set; } = "";
+
+    /// <summary>The button text while it's sent, such as "Rejecting…".</summary>
+    [Parameter, EditorRequired]
+    public string Busy { get; set; } = "";
+
+    /// <summary>Asks for the reason, such as "Why is it rejected?".</summary>
+    [Parameter, EditorRequired]
+    public string Question { get; set; } = "";
+
+    /// <summary>The Admin endpoint the reason is posted to, as <see cref="RejectForm"/> or <see cref="DeleteForm"/>.</summary>
+    [Parameter, EditorRequired]
+    public string Url { get; set; } = "";
+
+    [Parameter]
+    public EventCallback OnDone { get; set; }
+
+    private readonly string _reasonId = $"reason-{Guid.NewGuid():N}";
+    private bool _open;
+    private bool _busy;
+    private bool _failed;
+    private string _reason = "";
+
+    private void Open()
+    {
+        _open = true;
+        _reason = "";
+        _failed = false;
+    }
+
+    private async Task SendAsync()
+    {
+        _busy = true;
+        _failed = false;
+        try
+        {
+            // RejectForm and DeleteForm carry the same single field.
+            using var response = await Http.PostAsJsonAsync(Url, new { Reason = _reason });
+            _failed = !response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+            {
+                _open = false;
+                await OnDone.InvokeAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

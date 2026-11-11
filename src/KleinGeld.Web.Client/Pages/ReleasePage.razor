@@ -58,6 +58,16 @@ else
 
     @if (_release.Stage == ReleaseStage.Published)
     {
+        <AdminRemoval Action="Reject" Busy="Rejecting…" Question="Why is this Published Release rejected?"
+                      Url="@($"api/admin/releases/{_release.Id}/reject")"
+                      OnDone="() => Navigation.NavigateTo(Navigation.Uri, forceLoad: true)" />
+    }
+    <AdminRemoval Action="Delete Release" Busy="Deleting…" Question="Why is this Release deleted?"
+                  Url="@($"api/admin/releases/{_release.Id}/delete")"
+                  OnDone="@(() => Navigation.NavigateTo($"artists/{_release.ArtistId}"))" />
+
+    @if (_release.Stage == ReleaseStage.Published)
+    {
         <p><AddReleaseMenu ReleaseId="_release.Id" /></p>
     }
 

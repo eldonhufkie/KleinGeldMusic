@@ -225,18 +225,12 @@ internal static class ArtistEndpoints
             }));
 
         api.MapDelete("/artists/{id:guid}", async (
-            Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, CoverStore covers, BlobLinks links, PlayLinks playLinks) =>
+            Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, [AsParameters] RemovalStores stores) =>
         {
-            List<Guid> releaseIds = [];
-            List<string> blobNames = [];
-            var anyPublished = false;
+            var removed = Removed.Nothing;
             var result = await ChangeManagersAsync(db, id, caller, async artist =>
             {
-                var releases = await db.Releases.Include(r => r.Tracks).Where(r => r.ArtistId == id).ToListAsync();
-                releaseIds = releases.Select(r => r.Id).ToList();
-                blobNames = releases.SelectMany(r => r.Tracks).SelectMany(t => t.BlobNames()).ToList();
-                anyPublished = releases.Any(r => r.Stage == ReleaseStage.Published);
-                db.Artists.Remove(artist);
+                removed = await db.RemoveArtistAsync(artist);
                 return Results.NoContent();
             });
             if (result is not NoContent)
@@ -244,22 +238,7 @@ internal static class ArtistEndpoints
                 return result;
             }
 
-            // After the commit, so a link fetched meanwhile is either refused or signed against the policy that goes.
-            if (anyPublished)
-            {
-                await playLinks.RevokeAllAsync();
-            }
-
-            foreach (var releaseId in releaseIds)
-            {
-                await covers.DeleteAllAsync(releaseId);
-            }
-
-            foreach (var blobName in blobNames)
-            {
-                await links.Blob(TrackEndpoints.AudioContainer, blobName).DeleteIfExistsAsync();
-            }
-
+            await stores.CleanUpAsync(removed);
             return result;
         });
     }
@@ -278,6 +257,21 @@ internal static class ArtistEndpoints
     /// </summary>
     private static Task<IResult> ChangeManagersAsync(
         KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, Func<Artist, Task<IResult>> change) =>
+        db.WithArtistLockedAsync(id, artists => artists.ManagedBy(caller.MemberId()), change);
+
+    /// <summary>
+    /// <see cref="ChangeManagersAsync"/> for the Admin, who reaches every Artist: takes the same lock, so the Admin
+    /// deleting an Artist can't race its managers changing it.
+    /// </summary>
+    internal static Task<IResult> WithReviewedArtistLockedAsync(
+        this KleinGeldDbContext db, Guid id, Func<Artist, Task<IResult>> change) =>
+        db.WithArtistLockedAsync(id, artists => artists, change);
+
+    private static Task<IResult> WithArtistLockedAsync(
+        this KleinGeldDbContext db,
+        Guid id,
+        Func<IQueryable<Artist>, IQueryable<Artist>> reachable,
+        Func<Artist, Task<IResult>> change) =>
         // Retries run the whole transaction again, so nothing tracked by a failed attempt may carry over.
         db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
@@ -285,10 +279,9 @@ internal static class ArtistEndpoints
             await using var transaction = await db.Database.BeginTransactionAsync();
             await db.Database.ExecuteSqlAsync($"""SELECT 1 FROM "Artists" WHERE "Id" = {id} FOR UPDATE""");
 
-            var artist = await db.Artists
+            var artist = await reachable(db.Artists
                 .Include(a => a.Managers)
-                .Where(a => a.Id == id)
-                .ManagedBy(caller.MemberId())
+                .Where(a => a.Id == id))
                 .SingleOrDefaultAsync();
             if (artist is null)
             {

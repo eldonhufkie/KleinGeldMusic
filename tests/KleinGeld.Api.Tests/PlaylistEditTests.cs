@@ -43,6 +43,56 @@ public sealed partial class SubmitReleaseTests
     }
 
     [Fact]
+    public async Task Undo_takes_the_title_and_Artist_from_the_Track_not_from_the_request()
+    {
+        var (member, playlist, tracks) = await PlaylistWithThreeTracksAsync();
+        using var _ = member;
+        var first = (await ReadPlaylistAsync(member, playlist)).Tracks[0];
+
+        using var removed = await member.DeleteAsync($"/api/playlists/{playlist.Id}/entries/{first.EntryId}");
+        var undo = (await removed.Content.ReadFromJsonAsync<RemovedPlaylistEntry>())!;
+        using var restored = await member.PostAsJsonAsync(
+            $"/api/playlists/{playlist.Id}/entries/restore", undo with { Title = "Forged", ArtistName = "Forged" });
+        var afterUndo = (await ReadPlaylistAsync(member, playlist)).Tracks[0];
+
+        Assert.Equal(HttpStatusCode.OK, restored.StatusCode);
+        Assert.Equal(tracks[0].Id, afterUndo.TrackId);
+        Assert.Equal(first.Title, afterUndo.Title);
+        Assert.Equal(first.ArtistName, afterUndo.ArtistName);
+    }
+
+    [Fact]
+    public async Task Undo_of_a_Track_that_no_longer_exists_is_refused()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+        var playlist = await CreatePlaylistAsync(member, "Weg");
+
+        using var restored = await member.PostAsJsonAsync(
+            $"/api/playlists/{playlist.Id}/entries/restore", new RemovedPlaylistEntry(null, "Forged", "Forged", 1));
+        var page = await ReadPlaylistAsync(member, playlist);
+
+        Assert.Equal(HttpStatusCode.NotFound, restored.StatusCode);
+        Assert.Empty(page.Tracks);
+    }
+
+    [Fact]
+    public async Task Undo_cant_take_a_Playlist_past_a_thousand_Tracks()
+    {
+        var (member, playlist, _) = await PlaylistWithThreeTracksAsync();
+        using var __ = member;
+        var first = (await ReadPlaylistAsync(member, playlist)).Tracks[0];
+        using var removed = await member.DeleteAsync($"/api/playlists/{playlist.Id}/entries/{first.EntryId}");
+        var undo = (await removed.Content.ReadFromJsonAsync<RemovedPlaylistEntry>())!;
+        await app.FillPlaylistAsync(playlist.Id, 998);
+
+        using var restored = await member.PostAsJsonAsync($"/api/playlists/{playlist.Id}/entries/restore", undo);
+        var page = await ReadPlaylistAsync(member, playlist);
+
+        Assert.Equal(HttpStatusCode.Conflict, restored.StatusCode);
+        Assert.Equal(1000, page.Tracks.Count);
+    }
+
+    [Fact]
     public async Task A_Playlist_can_be_renamed_and_its_slug_follows()
     {
         using var member = await app.LoginAsNewMemberAsync();
