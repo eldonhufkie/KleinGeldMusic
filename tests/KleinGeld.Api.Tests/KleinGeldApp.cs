@@ -105,6 +105,17 @@ public sealed class KleinGeldApp : IAsyncLifetime
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>Adds an Artist with one Release of one Track straight to the database, Published or left a Draft.</summary>
+    public async Task SeedSearchCatalogAsync(SeededCatalog catalog)
+    {
+        using var client = CreateWebClient();
+        using var response = await client.PostAsJsonAsync("/testing/search-catalog", catalog);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public sealed record SeededCatalog(
+        string ArtistName, string ReleaseTitle, string TrackTitle, string? FeaturedArtists = null, bool Published = true);
+
     public async Task DisposeAsync()
     {
         if (_app is not null)
