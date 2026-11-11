@@ -30,6 +30,9 @@ public sealed class Track
 
     public bool Explicit { get; set; }
 
+    /// <summary>Added to a Published Release as part of its Pending Changes, so only its managers and the Admin see it.</summary>
+    public bool Pending { get; set; }
+
     public TrackStatus Status { get; set; } = TrackStatus.Uploading;
 
     /// <summary>Where the uploaded file is. Blob names are write-once: new audio gets a new name.</summary>

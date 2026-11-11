@@ -31,6 +31,10 @@
                     }
                     <TrackBadges Track="track" />
                     <span class="stage-badge">@track.Status</span>
+                    @if (track.Pending)
+                    {
+                        <span class="stage-badge">Pending Changes</span>
+                    }
                     @track.Duration?.ToString(@"m\:ss")
                     @if (_progress.TryGetValue(track.Id, out var percent))
                     {

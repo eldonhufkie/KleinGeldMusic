@@ -11,5 +11,8 @@ public sealed record ManagedArtist(
 /// <summary>A Member who manages an Artist.</summary>
 public sealed record ArtistManager(Guid Id, string Name);
 
-/// <summary>A Release on an Artist's page in My Artists, with the stage its badge shows.</summary>
-public sealed record ManagedRelease(Guid Id, string Title, string Slug, ReleaseType Type, DateOnly? ReleaseDate, ReleaseStage Stage, string? RejectionReason = null);
+/// <summary>A Release on an Artist's page in My Artists, with the stage its badge shows and the stage of any Pending Changes.</summary>
+public sealed record ManagedRelease(Guid Id, string Title, string Slug, ReleaseType Type, DateOnly? ReleaseDate, ReleaseStage Stage,
+    string? RejectionReason = null,
+    ReleaseStage? PendingChanges = null,
+    string? PendingChangesRejectionReason = null);

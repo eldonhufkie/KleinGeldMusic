@@ -20,7 +20,8 @@ internal static class AdminReviewEndpoints
             var releases = await db.Releases
                 .Include(r => r.Artist)
                 .Include(r => r.RightsDeclarations)
-                .Where(r => r.Stage == ReleaseStage.Submitted)
+                .Include(r => r.Tracks.Where(t => t.Pending))
+                .Where(AwaitsReview)
                 .ToListAsync();
 
             var memberIds = releases.SelectMany(r => r.RightsDeclarations).Select(d => d.MemberId).ToHashSet();
@@ -34,7 +35,13 @@ internal static class AdminReviewEndpoints
                         .Select(d => new MadeRightsDeclaration(
                             d.MemberId is { } id ? names.GetValueOrDefault(id) : null, d.MadeAt, d.WordingVersion))
                         .ToList();
-                    return new ReviewRelease(r.Id, r.Title, r.Slug, r.Artist.Name, r.Type, declarations[0].MadeAt, declarations);
+                    // For Pending Changes the Admin reviews only what changed: the added Tracks.
+                    var isPendingChanges = r.Stage == ReleaseStage.Published;
+                    var addedTracks = isPendingChanges
+                        ? r.Tracks.OrderBy(t => t.Position).Select(TrackEndpoints.ToSummary).ToList()
+                        : null;
+                    return new ReviewRelease(
+                        r.Id, r.Title, r.Slug, r.Artist.Name, r.Type, declarations[0].MadeAt, declarations, isPendingChanges, addedTracks);
                 })
                 .OrderBy(r => r.SubmittedAt)
                 .ToList();
@@ -50,8 +57,22 @@ internal static class AdminReviewEndpoints
             ILoggerFactory loggers) =>
         {
             Release? approved = null;
+            var mergedPendingChanges = false;
             var refused = await db.WithReviewedReleaseLockedAsync(id, async release =>
             {
+                // Approving Pending Changes merges their Tracks into the Release, which stays Published as before.
+                if (release.PendingChanges == ReleaseStage.Submitted)
+                {
+                    foreach (var track in release.Tracks)
+                    {
+                        track.Pending = false;
+                    }
+                    release.PendingChanges = null;
+                    await db.SaveChangesAsync();
+                    approved = release;
+                    mergedPendingChanges = true;
+                    return null;
+                }
                 if (release.Stage != ReleaseStage.Submitted)
                 {
                     return Results.Problem("Only a Submitted Release can be approved.", statusCode: StatusCodes.Status409Conflict);
@@ -69,7 +90,10 @@ internal static class AdminReviewEndpoints
             }
 
             // The Release is Published whatever happens here: Members can already play it even if the email fails.
-            await EmailManagersAsync(approved!, MemberEmails.ReleaseApproved, db, members, emails, loggers);
+            await EmailManagersAsync(
+                approved!,
+                mergedPendingChanges ? MemberEmails.PendingChangesApproved : MemberEmails.ReleaseApproved,
+                db, members, emails, loggers);
 
             return Results.Ok(approved!.ToDetails(covers));
         });
@@ -84,8 +108,19 @@ internal static class AdminReviewEndpoints
             ILoggerFactory loggers) =>
         {
             Release? rejected = null;
+            var rejectedPendingChanges = false;
             var refused = await db.WithReviewedReleaseLockedAsync(id, async release =>
             {
+                // Rejecting Pending Changes leaves the Release Published as it was.
+                if (release.PendingChanges == ReleaseStage.Submitted)
+                {
+                    release.PendingChanges = ReleaseStage.Rejected;
+                    release.PendingChangesRejectionReason = form.Reason.Trim();
+                    await db.SaveChangesAsync();
+                    rejected = release;
+                    rejectedPendingChanges = true;
+                    return null;
+                }
                 if (release.Stage != ReleaseStage.Submitted)
                 {
                     return Results.Problem("Only a Submitted Release can be rejected.", statusCode: StatusCodes.Status409Conflict);
@@ -103,7 +138,10 @@ internal static class AdminReviewEndpoints
             }
 
             // The Release is Rejected whatever happens here: My Artists shows the reason even if the email fails.
-            await EmailManagersAsync(rejected!, MemberEmails.ReleaseRejected, db, members, emails, loggers);
+            await EmailManagersAsync(
+                rejected!,
+                rejectedPendingChanges ? MemberEmails.PendingChangesRejected : MemberEmails.ReleaseRejected,
+                db, members, emails, loggers);
 
             return Results.Ok(rejected!.ToDetails(covers));
         });
@@ -141,5 +179,9 @@ internal static class AdminReviewEndpoints
 
     /// <summary>How much is waiting on the Review page, which the badge on the Admin link shows.</summary>
     public static Task<int> AwaitingReviewCountAsync(this KleinGeldDbContext db) =>
-        db.Releases.CountAsync(r => r.Stage == ReleaseStage.Submitted);
+        db.Releases.CountAsync(AwaitsReview);
+
+    /// <summary>A Submitted Release, or a Published one with Submitted Pending Changes.</summary>
+    private static readonly System.Linq.Expressions.Expression<Func<Release, bool>> AwaitsReview =
+        r => r.Stage == ReleaseStage.Submitted || r.PendingChanges == ReleaseStage.Submitted;
 }

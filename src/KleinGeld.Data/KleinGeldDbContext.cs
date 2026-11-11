@@ -48,6 +48,8 @@ public sealed class KleinGeldDbContext(DbContextOptions<KleinGeldDbContext> opti
             release.Property(r => r.Genre).HasMaxLength(ReleaseForm.GenreMaxLength);
             release.Property(r => r.Stage).HasConversion<string>().HasMaxLength(16);
             release.Property(r => r.RejectionReason).HasMaxLength(RejectForm.ReasonMaxLength);
+            release.Property(r => r.PendingChanges).HasConversion<string>().HasMaxLength(16);
+            release.Property(r => r.PendingChangesRejectionReason).HasMaxLength(RejectForm.ReasonMaxLength);
             release.HasOne(r => r.Artist).WithMany(a => a.Releases).OnDelete(DeleteBehavior.Cascade);
         });
 

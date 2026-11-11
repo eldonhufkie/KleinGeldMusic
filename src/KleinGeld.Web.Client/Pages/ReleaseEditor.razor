@@ -89,6 +89,24 @@ else
             }
             <button type="button" disabled="@(_busy || SubmitRefusal is not null || !_rightsDeclared)" @onclick="SubmitAsync">Submit for review</button>
         }
+        else if (_release.PendingChanges is ReleaseStage.Draft or ReleaseStage.Rejected)
+        {
+            <h2>Pending Changes</h2>
+            <p>Members keep seeing this Release as it is until the Admin approves the added Tracks.</p>
+            @if (_release.PendingChangesRejectionReason is not null)
+            {
+                <p>The Admin rejected these Pending Changes:</p>
+                <p class="rejection-reason">@_release.PendingChangesRejectionReason</p>
+            }
+            <label><input type="checkbox" @bind="_rightsDeclared" /> @RightsDeclarationWording.Text</label>
+            <button type="button" disabled="@(_busy || !_rightsDeclared)" @onclick="SubmitPendingChangesAsync">Submit Pending Changes for review</button>
+        }
+        else if (_release.PendingChanges == ReleaseStage.Submitted)
+        {
+            <h2>Pending Changes Submitted</h2>
+            <p>The added Tracks are waiting for the Admin's review and can't be changed. Withdraw them to edit them again.</p>
+            <button type="button" disabled="@_busy" @onclick="WithdrawPendingChangesAsync">Withdraw</button>
+        }
         else if (Locked)
         {
             <h2>Submitted</h2>
@@ -140,7 +158,7 @@ else
 
     private string Heading => string.IsNullOrEmpty(_release?.Title) ? "New Release" : _release.Title;
 
-    private bool Locked => _release?.Stage == ReleaseStage.Submitted;
+    private bool Locked => _release?.Stage == ReleaseStage.Submitted || _release?.PendingChanges == ReleaseStage.Submitted;
 
     /// <summary>Goes by the form, not the saved Release: Submit saves what's typed first.</summary>
     private string? SubmitRefusal => SubmitRules.Refusal(_form.Title, _form.ReleaseDate, _release?.Cover is not null, _statuses);
@@ -162,6 +180,15 @@ else
         });
         _rightsDeclared = false;
     }
+
+    private async Task SubmitPendingChangesAsync()
+    {
+        await ChangeStageAsync(() =>
+            Http.PostAsJsonAsync($"api/releases/{Id}/pending-changes/submit", new SubmitForm { RightsDeclared = _rightsDeclared }));
+        _rightsDeclared = false;
+    }
+
+    private Task WithdrawPendingChangesAsync() => ChangeStageAsync(() => Http.PostAsync($"api/releases/{Id}/pending-changes/withdraw", null));
 
     private Task WithdrawAsync() => ChangeStageAsync(() => Http.PostAsync($"api/releases/{Id}/withdraw", null));
 

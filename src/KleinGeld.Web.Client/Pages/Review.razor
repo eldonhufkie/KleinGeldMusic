@@ -34,6 +34,17 @@ else
                     by @(release.RightsDeclarations[0].MemberName ?? "a former Member"),
                     with Rights Declaration version @release.RightsDeclarations[0].WordingVersion
                 </p>
+                @if (release.IsPendingChanges)
+                {
+                    @* Only what changed: the Release itself was approved before. *@
+                    <p><span class="stage-badge">Pending Changes</span> Added Tracks:</p>
+                    <ol>
+                        @foreach (var track in release.AddedTracks ?? [])
+                        {
+                            <li>@track.Title @track.Duration?.ToString(@"m\:ss")</li>
+                        }
+                    </ol>
+                }
                 @if (_rejecting == release.Id)
                 {
                     <label for="reject-reason">Why is it rejected? The Artist's managers will read this.</label>

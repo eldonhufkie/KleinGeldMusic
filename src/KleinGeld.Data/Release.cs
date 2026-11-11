@@ -33,6 +33,15 @@ public sealed class Release
     /// <summary>Why the Admin last Rejected it, kept through a resubmission but only shown while it is Rejected.</summary>
     public string? RejectionReason { get; set; }
 
+    /// <summary>
+    /// The stage of its one set of Pending Changes: Draft, Submitted or Rejected, or null when it has none. Only a
+    /// Published Release has them; approving merges them into the Release.
+    /// </summary>
+    public ReleaseStage? PendingChanges { get; set; }
+
+    /// <summary>Why the Admin last Rejected its Pending Changes; only shown while they are Rejected.</summary>
+    public string? PendingChangesRejectionReason { get; set; }
+
     /// <summary>Names the blobs of the current cover art; null until one is uploaded.</summary>
     public Guid? CoverId { get; set; }
 
