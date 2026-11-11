@@ -77,6 +77,7 @@ var adminApi = app.MapGroup("/api/admin").RequireAuthorization(admin => admin.Re
 adminApi.MapAdminJoinRequestEndpoints();
 adminApi.MapAdminMemberEndpoints();
 adminApi.MapAdminReviewEndpoints();
+adminApi.MapAdminRemovalEndpoints();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
