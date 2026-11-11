@@ -81,6 +81,38 @@ internal static class TestingEndpoints
             return Results.NoContent();
         });
 
+        // Search tests need many named Artists, Releases and Tracks; real uploads would take minutes.
+        testing.MapPost("/search-catalog", async (KleinGeldDbContext db, [FromBody] SeededCatalog seeded) =>
+        {
+            var manager = await db.Users.FirstAsync();
+            var release = new Release
+            {
+                Title = seeded.ReleaseTitle,
+                Slug = Slugs.From(seeded.ReleaseTitle),
+                Type = ReleaseType.Single,
+                ReleaseDate = new DateOnly(2026, 1, 1),
+                PublishedAt = seeded.Published ? new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero) : null,
+                Stage = seeded.Published ? ReleaseStage.Published : ReleaseStage.Draft,
+            };
+            release.Tracks.Add(new Track
+            {
+                Title = seeded.TrackTitle,
+                FeaturedArtists = seeded.FeaturedArtists,
+                Position = 1,
+                Status = TrackStatus.Ready,
+                OriginalBlobName = $"seeded/{Guid.NewGuid()}",
+            });
+            db.Artists.Add(new Artist
+            {
+                Name = seeded.ArtistName,
+                Slug = Slugs.From(seeded.ArtistName),
+                Managers = [manager],
+                Releases = [release],
+            });
+            await db.SaveChangesAsync();
+            return Results.NoContent();
+        });
+
         testing.MapGet("/releases/{id:guid}/rejection-reason", async (Guid id, KleinGeldDbContext db) =>
             Results.Json(await db.Releases.Where(r => r.Id == id).Select(r => r.RejectionReason).SingleAsync()));
 
@@ -98,6 +130,9 @@ internal static class TestingEndpoints
     }
 
     private sealed record SeededRelease(string Title, DateTimeOffset PublishedAt, DateOnly? ReleaseDate);
+
+    private sealed record SeededCatalog(
+        string ArtistName, string ReleaseTitle, string TrackTitle, string? FeaturedArtists, bool Published);
 
     private sealed record SeededReleases(Guid ArtistId, ReleaseType Type, List<SeededRelease> Releases);
 }
