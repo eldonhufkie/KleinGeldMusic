@@ -73,6 +73,8 @@ public sealed partial class SubmitReleaseTests
         Assert.Contains("Spam uploads.", sent.Text);
         Assert.Contains(artistName, sent.Text);
         Assert.Contains(soloName, sent.Text);
+        Assert.Contains(DeletionPreview.BackupWording, sent.Text);
+        Assert.DoesNotContain("account", sent.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(await mailPit.SearchAsync(email, "The Admin deleted"));
         var members = await admin.GetFromJsonAsync<List<MemberListing>>("/api/admin/members");
         Assert.DoesNotContain(members!, m => m.Email == email);
