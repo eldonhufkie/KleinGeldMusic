@@ -21,11 +21,10 @@ internal static class AdminMemberEndpoints
 
         api.MapGet("/members", async (KleinGeldDbContext db) =>
         {
-            var adminRoleIds = db.Roles.Where(r => r.Name == Roles.Admin).Select(r => r.Id);
+            var adminIds = db.AdminIds();
             return await db.Users
                 .OrderBy(m => m.Email)
-                .Select(m => new MemberListing(m.Id, m.Email!,
-                    db.UserRoles.Any(ur => ur.UserId == m.Id && adminRoleIds.Contains(ur.RoleId))))
+                .Select(m => new MemberListing(m.Id, m.Email!, adminIds.Contains(m.Id)))
                 .ToListAsync();
         });
 
@@ -39,16 +38,16 @@ internal static class AdminMemberEndpoints
             Guid id, RemoveForm form, KleinGeldDbContext db, [AsParameters] RemovalStores stores,
             EmailSender emails, ILoggerFactory loggers) =>
         {
-            if (await db.IsAdminAsync(id))
+            var logger = loggers.CreateLogger(typeof(AdminMemberEndpoints));
+            var result = await db.DeleteAsync(stores, logger, id);
+            switch (result.Outcome)
             {
-                return Results.Problem("The Admin can't be Removed.", statusCode: StatusCodes.Status409Conflict);
+                case MemberDeletionOutcome.IsAdmin:
+                    return Results.Problem("The Admin can't be Removed.", statusCode: StatusCodes.Status409Conflict);
+                case MemberDeletionOutcome.NotFound:
+                    return Results.NotFound();
             }
-
-            var deleted = await db.DeleteAsync(stores, id);
-            if (deleted is null)
-            {
-                return Results.NotFound();
-            }
+            var deleted = result.Deleted!;
 
             try
             {
@@ -57,7 +56,7 @@ internal static class AdminMemberEndpoints
             catch (Exception exception)
             {
                 // The Removal stands whatever happens here.
-                loggers.CreateLogger(typeof(AdminMemberEndpoints)).LogError(exception, "Couldn't email Removed Member {Id}.", id);
+                logger.LogError(exception, "Couldn't email Removed Member {Id}.", id);
             }
             return Results.NoContent();
         });

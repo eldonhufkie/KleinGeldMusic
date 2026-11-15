@@ -23,7 +23,7 @@ internal static class MemberEndpoints
         // Leaving for good, after re-checking the password or a passkey. No email: they asked for it.
         api.MapPost("/me/leave", async (
             LeaveForm form, ClaimsPrincipal caller, KleinGeldDbContext db, UserManager<Member> members,
-            SignInManager<Member> signIn, [AsParameters] RemovalStores stores) =>
+            SignInManager<Member> signIn, [AsParameters] RemovalStores stores, ILoggerFactory loggers) =>
         {
             var memberId = caller.MemberId();
             if (await db.IsAdminAsync(memberId))
@@ -37,7 +37,14 @@ internal static class MemberEndpoints
                 return Results.Problem("That password or passkey isn't right.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            await db.DeleteAsync(stores, memberId);
+            var result = await db.DeleteAsync(stores, loggers.CreateLogger(typeof(MemberEndpoints)), memberId);
+            switch (result.Outcome)
+            {
+                case MemberDeletionOutcome.IsAdmin:
+                    return Results.Problem("The Admin can't Leave.", statusCode: StatusCodes.Status409Conflict);
+                case MemberDeletionOutcome.NotFound:
+                    return Results.NotFound();
+            }
             await signIn.SignOutAsync();
             return Results.NoContent();
         });
@@ -52,8 +59,16 @@ internal static class MemberEndpoints
 
         if (!string.IsNullOrEmpty(form.PasskeyCredentialJson))
         {
-            var assertion = await signIn.PerformPasskeyAssertionAsync(form.PasskeyCredentialJson);
-            return assertion.Succeeded && assertion.User.Id == member.Id;
+            try
+            {
+                var assertion = await signIn.PerformPasskeyAssertionAsync(form.PasskeyCredentialJson);
+                return assertion.Succeeded && assertion.User.Id == member.Id;
+            }
+            catch (InvalidOperationException)
+            {
+                // No passkey assertion was started in this browser, so whatever was sent can't answer one.
+                return false;
+            }
         }
 
         return false;

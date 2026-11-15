@@ -19,14 +19,14 @@
 }
 else
 {
-    <ul class="join-requests">
+    <ul class="member-list">
         @foreach (var member in _members)
         {
-            <li class="join-request">
+            <li class="member-list-item">
                 <p><strong>@member.Email</strong>@(member.IsAdmin ? " (Admin)" : "")</p>
                 @if (!member.IsAdmin && _removing != member.Id)
                 {
-                    <div class="actions">
+                    <div class="member-list-actions">
                         <button type="button" class="btn btn-danger" @onclick="() => ShowRemoveAsync(member)">Remove…</button>
                     </div>
                 }
@@ -38,39 +38,14 @@ else
                     }
                     else
                     {
-                        <p>Removing deletes their account for good. This also deletes:</p>
-                        <ul>
-                            @if (_preview.Playlists.Count == 0 && _preview.Artists.Count == 0)
-                            {
-                                <li>Nothing else: they have no Playlists and manage no Artist on their own.</li>
-                            }
-                            @foreach (var playlist in _preview.Playlists)
-                            {
-                                <li>Their Playlist "@playlist"</li>
-                            }
-                            @foreach (var artist in _preview.Artists)
-                            {
-                                <li>
-                                    The Artist @artist.Name, which only they manage@(artist.Releases.Count == 0 ? "" : ", with its Releases:")
-                                    @if (artist.Releases.Count > 0)
-                                    {
-                                        <ul>
-                                            @foreach (var release in artist.Releases)
-                                            {
-                                                <li>@release</li>
-                                            }
-                                        </ul>
-                                    }
-                                </li>
-                            }
-                        </ul>
-                        <p>Artists they manage with others stay, with their other managers. @_preview.BackupNotice</p>
+                        <p>Removing them is for good. This also deletes:</p>
+                        <DeletionPreviewList Preview="_preview" />
                         <EditForm Model="_form" OnValidSubmit="() => RemoveAsync(member)">
                             <DataAnnotationsValidator />
                             <label for="remove-reason">Reason (sent to them)</label>
                             <InputTextArea id="remove-reason" @bind-Value="_form.Reason" maxlength="@RemoveForm.ReasonMaxLength" />
                             <ValidationMessage For="() => _form.Reason" />
-                            <div class="actions">
+                            <div class="member-list-actions">
                                 <button type="button" class="btn" disabled="@_busy" @onclick="Cancel">Cancel</button>
                                 <button type="submit" class="btn btn-danger" disabled="@_busy">@(_busy ? "Removing…" : "Remove for good")</button>
                             </div>

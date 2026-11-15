@@ -54,7 +54,7 @@ else
     @if (_removed is { } removed)
     {
         <p role="status">
-            Removed @removed.Title.
+            Took @removed.Title off the Playlist.
             <button type="button" disabled="@_busy" @onclick="UndoAsync">Undo</button>
         </p>
     }
@@ -70,14 +70,14 @@ else
     @if (UnavailableCount > 0)
     {
         <p>
-            <button type="button" disabled="@_busy" @onclick="() => _confirmingClear = true">Remove unavailable Tracks (@UnavailableCount)</button>
+            <button type="button" disabled="@_busy" @onclick="() => _confirmingClear = true">Clear Unavailable Tracks (@UnavailableCount)</button>
         </p>
     }
     @if (_confirmingClear)
     {
         <p role="alert">
-            Remove @UnavailableCount unavailable @(UnavailableCount == 1 ? "Track" : "Tracks") from @_playlist.Name?
-            <button type="button" disabled="@_busy" @onclick="ClearUnavailableAsync">Remove</button>
+            Clear @UnavailableCount Unavailable @(UnavailableCount == 1 ? "Track" : "Tracks") off @_playlist.Name?
+            <button type="button" disabled="@_busy" @onclick="ClearUnavailableAsync">Clear</button>
             <button type="button" @onclick="() => _confirmingClear = false">Cancel</button>
         </p>
     }
@@ -107,7 +107,7 @@ else
                     </span>
                     <span>@track.Duration?.ToString(@"m\:ss")</span>
                     <TrackMenu Track="ToPlayerTrack(track)" />
-                    <button type="button" @onclick:stopPropagation="true" @onclick="() => RemoveAsync(track)">Remove</button>
+                    <button type="button" @onclick:stopPropagation="true" @onclick="() => RemoveAsync(track)">Take off Playlist</button>
                 </li>
             }
             else
@@ -117,7 +117,7 @@ else
                     <span>@number</span>
                     <span></span>
                     <span class="release-track-title">@track.Title <span>@track.ArtistName</span> <span>Unavailable</span></span>
-                    <button type="button" @onclick="() => RemoveAsync(track)">Remove</button>
+                    <button type="button" @onclick="() => RemoveAsync(track)">Take off Playlist</button>
                 </li>
             }
         }

@@ -21,6 +21,38 @@ public sealed partial class SubmitReleaseTests
     }
 
     [Fact]
+    public async Task Leaving_deletes_every_Join_Request_with_the_Members_email_whatever_its_status()
+    {
+        var email = $"{Guid.NewGuid():N}@example.test";
+        using var member = await app.LoginAsNewMemberAsync(email: email);
+        using var outsider = app.CreateWebClient();
+        using var again = await outsider.PostAsJsonAsync("/api/join-requests", new JoinRequestForm
+        {
+            Name = "Nog Een Keer",
+            Email = email,
+            Message = "Asking again.",
+        });
+        Assert.Equal(2, await app.CountJoinRequestsAsync(email));
+
+        using var left = await LeaveAsync(member, NewMembers.Password);
+
+        Assert.Equal(HttpStatusCode.NoContent, left.StatusCode);
+        Assert.Equal(0, await app.CountJoinRequestsAsync(email));
+    }
+
+    [Fact]
+    public async Task A_passkey_that_isnt_one_is_refused_like_a_wrong_password()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+
+        using var refused = await member.PostAsJsonAsync("/api/me/leave", new LeaveForm { PasskeyCredentialJson = "{\"id\":\"nope\"}" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        using var stillHere = await member.GetAsync("/api/me");
+        Assert.Equal(HttpStatusCode.OK, stillHere.StatusCode);
+    }
+
+    [Fact]
     public async Task The_Leave_confirmation_lists_Playlists_and_solely_managed_Artists_with_their_Releases()
     {
         using var member = await app.LoginAsNewMemberAsync();
