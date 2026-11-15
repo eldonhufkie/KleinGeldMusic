@@ -7,7 +7,7 @@ namespace KleinGeld.Api.Tests;
 /// <summary>Brings new Members in the way real ones arrive: Join Request, approval, set-password link, login.</summary>
 internal static class NewMembers
 {
-    private const string Password = "New-Member-Pa55word!";
+    public const string Password = "New-Member-Pa55word!";
 
     /// <summary>A client logged in as a Member nobody else has met, with the name they asked to join under.</summary>
     public static async Task<HttpClient> LoginAsNewMemberAsync(this KleinGeldApp app, string? name = null, string? email = null)
