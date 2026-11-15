@@ -624,3 +624,8 @@ body:has(.player-bar) .app-main {
         width: 100%;
     }
 }
+
+/* An Unavailable Track on a Playlist: greyed out, no links. */
+.release-tracks li.unavailable {
+    opacity: 0.5;
+}
