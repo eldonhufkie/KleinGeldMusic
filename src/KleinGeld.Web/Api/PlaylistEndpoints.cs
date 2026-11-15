@@ -278,6 +278,34 @@ internal static class PlaylistEndpoints
             return Results.Ok(new RemovedPlaylistEntry(entry.TrackId, entry.Title, entry.ArtistName, entry.Position));
         });
 
+        // "Remove unavailable Tracks": every entry whose Track is gone or whose Release isn't Published.
+        api.MapDelete("/playlists/{id:guid}/unavailable", async (
+            Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, TimeProvider clock) =>
+        {
+            var memberId = caller.MemberId();
+            var playlist = await db.Playlists
+                .Include(p => p.Entries).ThenInclude(e => e.Track).ThenInclude(t => t!.Release)
+                .SingleOrDefaultAsync(p => p.Id == id && p.MemberId == memberId);
+            if (playlist is null)
+            {
+                return Results.NotFound();
+            }
+            var entries = playlist.Entries.OrderBy(e => e.Position).ToList();
+            var unavailable = entries.Where(e => e.Track?.Release.Stage != ReleaseStage.Published).ToList();
+            if (unavailable.Count > 0)
+            {
+                foreach (var entry in unavailable)
+                {
+                    entries.Remove(entry);
+                    db.Remove(entry);
+                }
+                Renumber(entries);
+                playlist.ChangedAt = clock.GetUtcNow();
+                await db.SaveChangesAsync();
+            }
+            return Results.Ok(new RemovedUnavailableTracks(unavailable.Count));
+        });
+
         // The Undo of a removal: the entry goes back in the place it had, with the snapshot it had.
         api.MapPost("/playlists/{id:guid}/entries/restore", async (
             Guid id, RemovedPlaylistEntry removed, ClaimsPrincipal caller, KleinGeldDbContext db, TimeProvider clock) =>
