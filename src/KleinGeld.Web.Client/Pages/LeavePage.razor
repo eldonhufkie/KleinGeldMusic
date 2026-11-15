@@ -1,0 +1,105 @@
+@page "/leave"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+@* Leaving KleinGeld Music for good: what goes, then the password again. *@
+
+<PageTitle>Leave · KleinGeld Music</PageTitle>
+
+<h1>Leave KleinGeld Music</h1>
+
+@if (_preview is null)
+{
+    <p>@(_failed ? "Something went wrong. Reload the page and try again." : "Loading…")</p>
+}
+else
+{
+    <p>Leaving deletes your account for good. This also deletes:</p>
+    <ul>
+        @if (_preview.Playlists.Count == 0 && _preview.Artists.Count == 0)
+        {
+            <li>Nothing else: you have no Playlists and manage no Artist on your own.</li>
+        }
+        @foreach (var playlist in _preview.Playlists)
+        {
+            <li>Your Playlist "@playlist"</li>
+        }
+        @foreach (var artist in _preview.Artists)
+        {
+            <li>
+                The Artist @artist.Name, which only you manage@(artist.Releases.Count == 0 ? "" : ", with its Releases:")
+                @if (artist.Releases.Count > 0)
+                {
+                    <ul>
+                        @foreach (var release in artist.Releases)
+                        {
+                            <li>@release</li>
+                        }
+                    </ul>
+                }
+            </li>
+        }
+    </ul>
+    <p>Artists you manage with others stay, with their other managers. @_preview.BackupNotice</p>
+
+    <EditForm Model="_form" OnSubmit="LeaveAsync" class="leave-form">
+        <label for="leave-password">Your password</label>
+        <InputText id="leave-password" type="password" autocomplete="current-password" @bind-Value="_form.Password" />
+        @if (_refused is not null)
+        {
+            <p class="validation-message" role="alert">@_refused</p>
+        }
+        <button type="submit" disabled="@_leaving">@(_leaving ? "Leaving…" : "Leave for good")</button>
+    </EditForm>
+}
+
+@code {
+    private readonly LeaveForm _form = new();
+    private DeletionPreview? _preview;
+    private bool _failed;
+    private bool _leaving;
+    private string? _refused;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _preview = await Http.GetFromJsonAsync<DeletionPreview>("api/me/leave");
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+
+    private async Task LeaveAsync()
+    {
+        _leaving = true;
+        _refused = null;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync("api/me/leave", _form);
+            if (response.IsSuccessStatusCode)
+            {
+                // The next person on this device mustn't find the player as it was.
+                await JS.InvokeVoidAsync("localStorage.removeItem", JsPlayerStorage.Key);
+                Navigation.NavigateTo("", forceLoad: true);
+                return;
+            }
+
+            _refused = response.StatusCode == HttpStatusCode.Conflict
+                ? "The Admin can't Leave."
+                : "That password isn't right.";
+        }
+        catch (HttpRequestException)
+        {
+            _refused = "Something went wrong. Try again.";
+        }
+        finally
+        {
+            _leaving = false;
+        }
+    }
+}

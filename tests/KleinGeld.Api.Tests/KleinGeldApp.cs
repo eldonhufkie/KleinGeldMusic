@@ -98,6 +98,13 @@ public sealed class KleinGeldApp : IAsyncLifetime
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>How many Join Requests with this email are stored, of any status.</summary>
+    public async Task<int> CountJoinRequestsAsync(string email)
+    {
+        using var client = CreateWebClient();
+        return await client.GetFromJsonAsync<int>($"/testing/join-requests/count?email={Uri.EscapeDataString(email)}");
+    }
+
     /// <summary>The reason as stored, which the API only shows while the Release is Rejected.</summary>
     public async Task<string?> ReadStoredRejectionReasonAsync(Guid releaseId)
     {

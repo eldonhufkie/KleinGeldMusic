@@ -131,6 +131,9 @@ internal static class TestingEndpoints
         testing.MapGet("/releases/{id:guid}/rejection-reason", async (Guid id, KleinGeldDbContext db) =>
             Results.Json(await db.Releases.Where(r => r.Id == id).Select(r => r.RejectionReason).SingleAsync()));
 
+        testing.MapGet("/join-requests/count", async (string email, KleinGeldDbContext db) =>
+            await db.JoinRequests.CountAsync(r => r.NormalizedEmail == email.ToUpperInvariant()));
+
         testing.MapPost("/security-stamp",async (UserManager<Member> members, [FromBody] string email) =>
         {
             var member = await members.FindByEmailAsync(email);
