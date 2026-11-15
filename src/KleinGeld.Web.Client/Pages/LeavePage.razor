@@ -3,8 +3,9 @@
 @inject HttpClient Http
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject AntiforgeryStateProvider Antiforgery
 
-@* Leaving KleinGeld Music for good: what goes, then the password again. *@
+@* Leaving KleinGeld Music for good: what goes, then the password or a passkey again. *@
 
 <PageTitle>Leave · KleinGeld Music</PageTitle>
 
@@ -16,33 +17,8 @@
 }
 else
 {
-    <p>Leaving deletes your account for good. This also deletes:</p>
-    <ul>
-        @if (_preview.Playlists.Count == 0 && _preview.Artists.Count == 0)
-        {
-            <li>Nothing else: you have no Playlists and manage no Artist on your own.</li>
-        }
-        @foreach (var playlist in _preview.Playlists)
-        {
-            <li>Your Playlist "@playlist"</li>
-        }
-        @foreach (var artist in _preview.Artists)
-        {
-            <li>
-                The Artist @artist.Name, which only you manage@(artist.Releases.Count == 0 ? "" : ", with its Releases:")
-                @if (artist.Releases.Count > 0)
-                {
-                    <ul>
-                        @foreach (var release in artist.Releases)
-                        {
-                            <li>@release</li>
-                        }
-                    </ul>
-                }
-            </li>
-        }
-    </ul>
-    <p>Artists you manage with others stay, with their other managers. @_preview.BackupNotice</p>
+    <p>Leaving KleinGeld Music is for good. This also deletes:</p>
+    <DeletionPreviewList Preview="_preview" Own="true" />
 
     <EditForm Model="_form" OnSubmit="LeaveAsync" class="leave-form">
         <label for="leave-password">Your password</label>
@@ -52,6 +28,7 @@ else
             <p class="validation-message" role="alert">@_refused</p>
         }
         <button type="submit" disabled="@_leaving">@(_leaving ? "Leaving…" : "Leave for good")</button>
+        <button type="button" disabled="@_leaving" @onclick="LeaveWithPasskeyAsync">Leave for good with a passkey</button>
     </EditForm>
 }
 
@@ -74,13 +51,36 @@ else
         }
     }
 
-    private async Task LeaveAsync()
+    private Task LeaveAsync() => SendAsync(new LeaveForm { Password = _form.Password });
+
+    private async Task LeaveWithPasskeyAsync()
+    {
+        _leaving = true;
+        _refused = null;
+        string credentialJson;
+        try
+        {
+            // The same passkey request the login page makes, from the Identity pages' script.
+            await using var passkeys = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Account/Shared/PasskeySubmit.razor.js");
+            var token = Antiforgery.GetAntiforgeryToken();
+            credentialJson = await passkeys.InvokeAsync<string>("requestCredentialJson", "RequestVerificationToken", token?.Value ?? "");
+        }
+        catch (JSException)
+        {
+            _refused = "No passkey was provided.";
+            _leaving = false;
+            return;
+        }
+        await SendAsync(new LeaveForm { PasskeyCredentialJson = credentialJson });
+    }
+
+    private async Task SendAsync(LeaveForm form)
     {
         _leaving = true;
         _refused = null;
         try
         {
-            using var response = await Http.PostAsJsonAsync("api/me/leave", _form);
+            using var response = await Http.PostAsJsonAsync("api/me/leave", form);
             if (response.IsSuccessStatusCode)
             {
                 // The next person on this device mustn't find the player as it was.
@@ -89,9 +89,12 @@ else
                 return;
             }
 
-            _refused = response.StatusCode == HttpStatusCode.Conflict
-                ? "The Admin can't Leave."
-                : "That password isn't right.";
+            _refused = response.StatusCode switch
+            {
+                HttpStatusCode.BadRequest => "That password or passkey isn't right.",
+                HttpStatusCode.Conflict => "The Admin can't Leave.",
+                _ => "Something went wrong. Try again.",
+            };
         }
         catch (HttpRequestException)
         {

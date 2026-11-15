@@ -1,0 +1,37 @@
+@* What deleting a Member deletes with them, worded for the Member themselves on Leave or for the Admin on Remove. *@
+
+<ul class="deletion-preview">
+    @if (Preview.Playlists.Count == 0 && Preview.Artists.Count == 0)
+    {
+        <li>Nothing else: @(Own ? "you have" : "they have") no Playlists and manage no Artist on @(Own ? "your" : "their") own.</li>
+    }
+    @foreach (var playlist in Preview.Playlists)
+    {
+        <li>@(Own ? "Your" : "Their") Playlist "@playlist"</li>
+    }
+    @foreach (var artist in Preview.Artists)
+    {
+        <li>
+            The Artist @artist.Name, which only @(Own ? "you" : "they") manage@(artist.Releases.Count == 0 ? "" : ", with its Releases:")
+            @if (artist.Releases.Count > 0)
+            {
+                <ul>
+                    @foreach (var release in artist.Releases)
+                    {
+                        <li>@release</li>
+                    }
+                </ul>
+            }
+        </li>
+    }
+</ul>
+<p>Artists @(Own ? "you" : "they") manage with others stay, with their other managers. @Preview.BackupNotice</p>
+
+@code {
+    [Parameter, EditorRequired]
+    public DeletionPreview Preview { get; set; } = null!;
+
+    /// <summary>Whether the Member reads it about themselves (Leave) rather than the Admin about them (Remove).</summary>
+    [Parameter]
+    public bool Own { get; set; }
+}
