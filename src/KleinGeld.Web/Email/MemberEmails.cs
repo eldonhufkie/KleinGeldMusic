@@ -117,4 +117,21 @@ internal static class MemberEmails
             "",
             "It's gone for good, with its Tracks and covers.",
         ]));
+
+    /// <summary>Email 10: the Admin Removed the Member, with the reason and the Artists deleted with them.</summary>
+    public static OutgoingEmail Removed(MailboxAddress person, string reason, IReadOnlyList<KleinGeld.Contracts.DeletedArtist> artists) =>
+        new(person, "You were removed from KleinGeld Music", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            "The Admin removed you from KleinGeld Music:",
+            "",
+            reason,
+            "",
+            .. artists.Count == 0
+                ? (string[])["Your account and Playlists are gone for good."]
+                : ["Your account and Playlists are gone for good, and so are the Artists only you managed, with their Releases:", .. artists.Select(a => $"- {a.Name}")],
+            "",
+            "Backups containing your data are erased within 30 days.",
+        ]));
 }
