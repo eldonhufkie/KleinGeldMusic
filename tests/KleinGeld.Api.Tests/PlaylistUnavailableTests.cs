@@ -59,7 +59,7 @@ public sealed partial class SubmitReleaseTests
     }
 
     [Fact]
-    public async Task Remove_unavailable_Tracks_clears_them_all_and_keeps_the_rest_in_order()
+    public async Task Clear_Unavailable_Tracks_clears_them_all_and_keeps_the_rest_in_order()
     {
         var (member, playlist, releases, tracks) = await PlaylistOfThreeSinglesAsync();
         using var _ = member;
@@ -73,9 +73,33 @@ public sealed partial class SubmitReleaseTests
         var page = await ReadPlaylistAsync(member, playlist);
 
         Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
-        Assert.Equal(2, (await cleared.Content.ReadFromJsonAsync<RemovedUnavailableTracks>())!.Removed);
+        Assert.Equal(2, (await cleared.Content.ReadFromJsonAsync<ClearedUnavailableTracks>())!.Cleared);
         Assert.Equal([(Guid?)tracks[1].Id], page.Tracks.Select(t => t.TrackId));
         Assert.True(page.ChangedAt > playlist.ChangedAt);
+    }
+
+    [Fact]
+    public async Task A_Track_removed_by_approved_Pending_Changes_is_Unavailable_and_cleared_with_the_rest()
+    {
+        using var member = await app.LoginAsNewMemberAsync();
+        using var admin = await app.LoginAsAdminAsync();
+        var release = await CreatePublishedAsync(member, admin);
+        var kept = (await ReadTracksAsync(member, release)).Single();
+        var gone = await AddApprovedTrackAsync(member, admin, release);
+        var playlist = await CreatePlaylistAsync(member, "Weggehaald");
+        (await AddToPlaylistAsync(member, playlist, kept)).Dispose();
+        (await AddToPlaylistAsync(member, playlist, gone.Track)).Dispose();
+        (await member.DeleteAsync($"/api/releases/{release.Id}/tracks/{gone.Track.Id}")).Dispose();
+        (await SubmitPendingChangesAsync(member, release)).Dispose();
+        (await ApproveAsync(admin, release)).Dispose();
+
+        var before = await ReadPlaylistAsync(member, playlist);
+        using var cleared = await member.DeleteAsync($"/api/playlists/{playlist.Id}/unavailable");
+        var after = await ReadPlaylistAsync(member, playlist);
+
+        Assert.Equal([true, false], before.Tracks.Select(t => t.IsAvailable));
+        Assert.Equal(1, (await cleared.Content.ReadFromJsonAsync<ClearedUnavailableTracks>())!.Cleared);
+        Assert.Equal([(Guid?)kept.Id], after.Tracks.Select(t => t.TrackId));
     }
 
     [Fact]

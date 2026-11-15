@@ -63,49 +63,14 @@ internal static class PlaylistEndpoints
                 return Results.Redirect($"/api/playlists/{playlist.Id}/{playlist.Slug}");
             }
 
-            var entries = await db.Set<PlaylistEntry>()
-                .Where(e => e.PlaylistId == id)
-                .OrderBy(e => e.Position)
-                .Select(e => new
-                {
-                    e.Id,
-                    e.TrackId,
-                    e.Title,
-                    e.ArtistName,
-                    Track = e.Track == null ? null : new
-                    {
-                        e.Track.Title,
-                        // A replaced Track plays its live audio for Members until the Pending Changes are approved.
-                        Duration = e.Track.LiveConvertedBlobName != null ? e.Track.LiveDuration : e.Track.Duration,
-                        e.Track.SingleMark,
-                        e.Track.FeaturedArtists,
-                        e.Track.Explicit,
-                        Ready = e.Track.LiveConvertedBlobName != null || e.Track.Status == TrackStatus.Ready,
-                        e.Track.Release.ArtistId,
-                        ArtistName = e.Track.Release.Artist.Name,
-                        ReleaseId = e.Track.Release.Id,
-                        ReleaseTitle = e.Track.Release.Title,
-                        ReleaseSlug = e.Track.Release.Slug,
-                        Published = e.Track.Release.Stage == ReleaseStage.Published,
-                        e.Track.Release.CoverId,
-                    },
-                })
-                .ToListAsync();
-
-            var tracks = entries
-                .Select(e => e.Track is { Published: true } t
-                    ? new PlaylistTrack(
-                        e.TrackId, t.Title, t.ArtistName, t.Ready, t.ArtistId, t.ReleaseId,
-                        t.ReleaseTitle, t.ReleaseSlug, t.Duration, t.SingleMark, t.FeaturedArtists, t.Explicit) { EntryId = e.Id }
-                    : new PlaylistTrack(e.TrackId, e.Title, e.ArtistName, IsAvailable: false) { EntryId = e.Id })
-                .ToList();
-            var total = TimeSpan.FromTicks(tracks.Where(t => t.IsAvailable).Sum(t => t.Duration?.Ticks ?? 0));
+            var tracks = await ReadEntriesAsync(db, id);
+            var total = TimeSpan.FromTicks(tracks.Where(t => t.Track.IsAvailable).Sum(t => t.Track.Duration?.Ticks ?? 0));
 
             // The cover is the cover of the first playable Track's Release.
-            var coverOf = entries.FirstOrDefault(e => e.Track is { Published: true, Ready: true })?.Track;
-            return Results.Ok(new PlaylistDetails(playlist.Id, playlist.Name, playlist.Slug, playlist.ChangedAt, tracks, total)
+            var coverOf = tracks.FirstOrDefault(t => t.Track.IsAvailable);
+            return Results.Ok(new PlaylistDetails(playlist.Id, playlist.Name, playlist.Slug, playlist.ChangedAt, tracks.Select(t => t.Track).ToList(), total)
             {
-                Cover = coverOf?.CoverId is { } coverId ? covers.LinksTo(coverOf.ReleaseId, coverId) : null,
+                Cover = coverOf?.CoverId is { } coverId ? covers.LinksTo(coverOf.Track.ReleaseId!.Value, coverId) : null,
             });
         });
 
@@ -278,20 +243,19 @@ internal static class PlaylistEndpoints
             return Results.Ok(new RemovedPlaylistEntry(entry.TrackId, entry.Title, entry.ArtistName, entry.Position));
         });
 
-        // "Remove unavailable Tracks": every entry whose Track is gone or whose Release isn't Published.
+        // "Clear Unavailable Tracks": takes off exactly the entries the Playlist page shows as Unavailable.
         api.MapDelete("/playlists/{id:guid}/unavailable", async (
             Guid id, ClaimsPrincipal caller, KleinGeldDbContext db, TimeProvider clock) =>
         {
-            var memberId = caller.MemberId();
-            var playlist = await db.Playlists
-                .Include(p => p.Entries).ThenInclude(e => e.Track).ThenInclude(t => t!.Release)
-                .SingleOrDefaultAsync(p => p.Id == id && p.MemberId == memberId);
+            var playlist = await FindOwnAsync(db, id, caller);
             if (playlist is null)
             {
                 return Results.NotFound();
             }
+            var unavailableIds = (await ReadEntriesAsync(db, id))
+                .Where(t => !t.Track.IsAvailable).Select(t => t.Track.EntryId).ToHashSet();
             var entries = playlist.Entries.OrderBy(e => e.Position).ToList();
-            var unavailable = entries.Where(e => e.Track?.Release.Stage != ReleaseStage.Published).ToList();
+            var unavailable = entries.Where(e => unavailableIds.Contains(e.Id)).ToList();
             if (unavailable.Count > 0)
             {
                 foreach (var entry in unavailable)
@@ -303,7 +267,7 @@ internal static class PlaylistEndpoints
                 playlist.ChangedAt = clock.GetUtcNow();
                 await db.SaveChangesAsync();
             }
-            return Results.Ok(new RemovedUnavailableTracks(unavailable.Count));
+            return Results.Ok(new ClearedUnavailableTracks(unavailable.Count));
         });
 
         // The Undo of a removal: the entry goes back in the place it had, with the snapshot it had.
@@ -351,6 +315,56 @@ internal static class PlaylistEndpoints
             await db.SaveChangesAsync();
             return Results.Ok(ToSummary(playlist, entries.Count));
         });
+    }
+
+    /// <summary>A Playlist entry as the Playlist page shows it, with what's needed to pick the cover.</summary>
+    private sealed record EntryRow(PlaylistTrack Track, Guid? CoverId);
+
+    /// <summary>
+    /// The Playlist's entries in order. The one place that decides whether an entry is Unavailable, for the page and
+    /// for clearing alike: its Track is gone (deleted, or removed from its Release by approved Pending Changes), its
+    /// Release isn't Published, or it has no audio Members can play (a replaced Track counts its live audio).
+    /// </summary>
+    private static async Task<List<EntryRow>> ReadEntriesAsync(KleinGeldDbContext db, Guid playlistId)
+    {
+        var entries = await db.Set<PlaylistEntry>()
+            .Where(e => e.PlaylistId == playlistId)
+            .OrderBy(e => e.Position)
+            .Select(e => new
+            {
+                e.Id,
+                e.TrackId,
+                e.Title,
+                e.ArtistName,
+                Track = e.Track == null ? null : new
+                {
+                    e.Track.Title,
+                    // A replaced Track plays its live audio for Members until the Pending Changes are approved.
+                    Duration = e.Track.LiveConvertedBlobName != null ? e.Track.LiveDuration : e.Track.Duration,
+                    e.Track.SingleMark,
+                    e.Track.FeaturedArtists,
+                    e.Track.Explicit,
+                    Ready = e.Track.LiveConvertedBlobName != null || e.Track.Status == TrackStatus.Ready,
+                    e.Track.Release.ArtistId,
+                    ArtistName = e.Track.Release.Artist.Name,
+                    ReleaseId = e.Track.Release.Id,
+                    ReleaseTitle = e.Track.Release.Title,
+                    ReleaseSlug = e.Track.Release.Slug,
+                    Published = e.Track.Release.Stage == ReleaseStage.Published,
+                    e.Track.Release.CoverId,
+                },
+            })
+            .ToListAsync();
+
+        return entries
+            .Select(e => e.Track is { Published: true } t
+                ? new EntryRow(
+                    new PlaylistTrack(
+                        e.TrackId, t.Title, t.ArtistName, IsAvailable: t.Ready, t.ArtistId, t.ReleaseId,
+                        t.ReleaseTitle, t.ReleaseSlug, t.Duration, t.SingleMark, t.FeaturedArtists, t.Explicit) { EntryId = e.Id },
+                    t.CoverId)
+                : new EntryRow(new PlaylistTrack(e.TrackId, e.Title, e.ArtistName, IsAvailable: false) { EntryId = e.Id }, null))
+            .ToList();
     }
 
     private static Task<Playlist?> FindOwnAsync(KleinGeldDbContext db, Guid id, ClaimsPrincipal caller)
