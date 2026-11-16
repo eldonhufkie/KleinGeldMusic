@@ -7,19 +7,27 @@
 
 @inject UserManager<Member> UserManager
 @inject SignInManager<Member> SignInManager
-@inject IdentityRedirectManager RedirectManager
+
+@* Where the link in email 4 leads. *@
 
 <PageTitle>Confirm email change</PageTitle>
 
 <h1>Confirm email change</h1>
 
-<StatusMessage Message="@message" />
+@if (_changed)
+{
+    <p role="status">Your login email is now <strong>@Email</strong>. <a href="">Go to KleinGeld Music</a>.</p>
+}
+else
+{
+    <p role="alert">
+        This link has expired, was already used, or the address can't be used. Links work for 15 minutes.
+        Your login email hasn't changed. To try again, go to <a href="Account/Manage/Email">Manage email</a>.
+    </p>
+}
 
 @code {
-    private string? message;
-
-    [CascadingParameter]
-    private HttpContext HttpContext { get; set; } = default!;
+    private bool _changed;
 
     [SupplyParameterFromQuery]
     private string? UserId { get; set; }
@@ -34,36 +42,34 @@
     {
         if (UserId is null || Email is null || Code is null)
         {
-            RedirectManager.RedirectToWithStatus(
-                "Account/Login", "Error: Invalid email change confirmation link.", HttpContext);
             return;
         }
 
-        var user = await UserManager.FindByIdAsync(UserId);
-        if (user is null)
+        string code;
+        try
         {
-            message = "Unable to find user with Id '{userId}'";
-            return;
+            code = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(Code));
         }
-
-        var code = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(Code));
-        var result = await UserManager.ChangeEmailAsync(user, Email, code);
-        if (!result.Succeeded)
+        catch (FormatException)
         {
-            message = "Error changing email.";
             return;
         }
 
-        // In our UI email and user name are one and the same, so when we update the email
-        // we need to update the user name.
-        var setUserNameResult = await UserManager.SetUserNameAsync(user, Email);
-        if (!setUserNameResult.Succeeded)
+        var member = await UserManager.FindByIdAsync(UserId);
+        if (member is null)
         {
-            message = "Error changing user name.";
             return;
         }
 
-        await SignInManager.RefreshSignInAsync(user);
-        message = "Thank you for confirming your email change.";
+        // The email is the user name too. Set here so ChangeEmailAsync validates and saves both at once: a separate
+        // SetUserNameAsync could fail after the email had already changed.
+        member.UserName = Email;
+        var result = await UserManager.ChangeEmailAsync(member, Email, code);
+        if (result.Succeeded)
+        {
+            _changed = true;
+            // Keeps this browser logged in despite the new security stamp, if it's the Member's own session.
+            await SignInManager.RefreshSignInAsync(member);
+        }
     }
 }

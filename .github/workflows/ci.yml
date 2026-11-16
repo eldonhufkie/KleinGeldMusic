@@ -73,10 +73,16 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       # Never `latest`: a release is always named by its commit SHA, which release.env on the server points at.
+      # The web host and the worker run ffprobe and FFmpeg, so their images sit on one with FFmpeg installed.
       - name: Build and push the images
         run: |
-          for app in web migrator; do
-            dotnet publish "src/KleinGeld.${app^}" -c Release -t:PublishContainer \
+          base="ghcr.io/eldonhufkie/kleingeld-ffmpeg-base:${{ github.sha }}"
+          docker build -t "$base" -f docker/ffmpeg-base.Dockerfile docker
+          docker push "$base"
+          for app in web worker migrator; do
+            base_image=""
+            if [ "$app" != migrator ]; then base_image="-p:ContainerBaseImage=$base"; fi
+            dotnet publish "src/KleinGeld.${app^}" -c Release -t:PublishContainer $base_image \
               -p:ContainerRegistry=ghcr.io \
               -p:ContainerRepository="eldonhufkie/kleingeld-$app" \
               -p:ContainerImageTags="${{ github.sha }}"
@@ -105,7 +111,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        package: [kleingeld-web, kleingeld-migrator]
+        package: [kleingeld-web, kleingeld-worker, kleingeld-migrator, kleingeld-ffmpeg-base]
     steps:
       - uses: actions/delete-package-versions@v5
         with:

@@ -1,0 +1,424 @@
+using System.Security.Claims;
+using Azure;
+using KleinGeld.Contracts;
+using KleinGeld.Data;
+using KleinGeld.Web.Blobs;
+using Microsoft.EntityFrameworkCore;
+
+namespace KleinGeld.Web.Api;
+
+internal static class TrackEndpoints
+{
+    public const string AudioContainer = Track.AudioContainer;
+
+    /// <summary>Endpoints for adding audio to a Release: request a link, upload to it, confirm; and for removing it.</summary>
+    public static void MapTrackEndpoints(this RouteGroupBuilder api)
+    {
+        // Not under /releases/{id}: a GET there is the Release itself, whose slug could be "tracks".
+        api.MapGet("/tracks", async (Guid releaseId, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        {
+            var release = await db.Releases
+                .Include(r => r.Tracks)
+                .Where(r => r.Id == releaseId)
+                .VisibleTo(caller)
+                .SingleOrDefaultAsync();
+            if (release is null)
+            {
+                return Results.NotFound();
+            }
+
+            var seesPending = await db.Releases.Where(r => r.Id == releaseId).SeesPendingChanges(caller).AnyAsync();
+            return Results.Ok(release.Tracks
+                .Where(t => seesPending || !t.Pending)
+                .OrderBy(t => t.Position)
+                .Select(t => ToSummary(t, seesPending)));
+        });
+
+        // Those who see Pending Changes hear a replaced Track's new audio, or its live audio with old=true; Members
+        // always hear the live audio.
+        api.MapGet("/tracks/{id:guid}/play-link", async (
+            Guid id, bool? old, ClaimsPrincipal caller, KleinGeldDbContext db, PlayLinks links, CoverStore covers) =>
+        {
+            // The access rule is the visibility rule: whoever may see a Track's Release may play the Track.
+            // Pending Changes aren't part of the Release yet, so only those who see them may play their Tracks.
+            var withPending = db.Releases.SeesPendingChanges(caller).Select(r => r.Id);
+            var found = await db.Releases
+                .VisibleTo(caller)
+                .Where(r => !r.Tracks.Any(t => t.Id == id && t.Pending) || withPending.Contains(r.Id))
+                .SelectMany(r => r.Tracks, (release, track) => new { ReleaseId = release.Id, release.CoverId, Track = track })
+                .SingleOrDefaultAsync(row => row.Track.Id == id);
+            if (found is null)
+            {
+                return Results.NotFound();
+            }
+
+            var track = found.Track;
+            var live = track.IsReplaced
+                && (old == true || !await db.Releases.Where(r => r.Id == found.ReleaseId).SeesPendingChanges(caller).AnyAsync());
+            if (!live && track.Status != TrackStatus.Ready)
+            {
+                return Results.Problem("This Track isn't ready to play yet.", statusCode: StatusCodes.Status409Conflict);
+            }
+
+            var link = await links.ForAsync(live ? track.LiveConvertedBlobName! : track.ConvertedBlobName!);
+            return Results.Ok(link with
+            {
+                Cover = found.CoverId is { } coverId ? covers.LinksTo(found.ReleaseId, coverId) : null,
+            });
+        });
+
+        api.MapPost("/releases/{id:guid}/tracks", async (Guid id, TrackUploadForm form, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links) =>
+        {
+            Track? added = null;
+            var refused = await WithReleaseLockedAsync(db, id, caller, startsPendingChange: true, async release =>
+            {
+                if (release.Tracks.Count >= TrackUploadForm.MaxTracksPerRelease)
+                {
+                    return Results.Problem(
+                        $"A Release can hold at most {TrackUploadForm.MaxTracksPerRelease} Tracks.",
+                        statusCode: StatusCodes.Status409Conflict);
+                }
+
+                var trackId = Guid.CreateVersion7();
+                added = new Track
+                {
+                    Id = trackId,
+                    ReleaseId = release.Id,
+                    Title = TitleFrom(form.FileName),
+                    Position = release.Tracks.Count + 1,
+                    // No extension: the name must tell ffprobe nothing about the file.
+                    OriginalBlobName = $"tracks/{trackId}/{Guid.CreateVersion7()}",
+                    Pending = release.Stage == ReleaseStage.Published,
+                };
+                db.Tracks.Add(added);
+                if (added.Pending)
+                {
+                    release.PendingChanges ??= ReleaseStage.Draft;
+                }
+                await db.SaveChangesAsync();
+                return null;
+            });
+            if (refused is not null)
+            {
+                return refused;
+            }
+
+            var link = await links.ForUploadAsync(AudioContainer, added!.OriginalBlobName, added.Id);
+            return Results.Created($"/api/tracks?releaseId={id}", new TrackUpload(ToSummary(added), link.Url));
+        });
+
+        api.MapPost("/releases/{id:guid}/tracks/{trackId:guid}/confirm", async (
+            Guid id, Guid trackId, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links, AudioProbe probe, TagReader tagReader, CoverStore covers) =>
+        {
+            var memberId = caller.MemberId();
+            var track = await db.Tracks
+                .Where(t => t.Id == trackId && t.ReleaseId == id)
+                .Where(t => t.Release.Artist.Managers.Any(m => m.Id == memberId))
+                .SingleOrDefaultAsync();
+            if (track is null)
+            {
+                return Results.NotFound();
+            }
+            if (track.Status != TrackStatus.Uploading)
+            {
+                return Results.Ok(new TrackConfirmation(ToSummary(track)));
+            }
+
+            long size;
+            try
+            {
+                size = (await links.Blob(AudioContainer, track.OriginalBlobName).GetPropertiesAsync()).Value.ContentLength;
+            }
+            catch (RequestFailedException e) when (e.Status == StatusCodes.Status404NotFound)
+            {
+                return Results.Problem("The file hasn't finished uploading.", statusCode: StatusCodes.Status409Conflict);
+            }
+
+            // The size the browser declared proves nothing, and a SAS link can't limit what is uploaded to it.
+            var format = size > TrackUploadForm.MaxFileSize
+                ? null
+                : await probe.AcceptedFormatAsync(links.ForServerReading(AudioContainer, track.OriginalBlobName));
+            if (format is null)
+            {
+                var problem = size > TrackUploadForm.MaxFileSize
+                    ? "A Track's file can be at most 500 MB."
+                    : "That file isn't audio we accept. Use FLAC, WAV, AIFF, ALAC, MP3 or AAC.";
+                if (track.IsReplacingFailedAudio)
+                {
+                    track.Status = TrackStatus.Failed;
+                    await db.SaveChangesAsync();
+                    await links.Blob(AudioContainer, track.OriginalBlobName).DeleteIfExistsAsync();
+                }
+                else
+                {
+                    await RemoveAsync(db, links, id, trackId, caller);
+                }
+                return Results.Problem(problem, statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
+
+            var tags = await tagReader.ReadAsync(track.OriginalBlobName, format);
+
+            // Before taking the lock: this is the slow part. A cover that loses a race is an orphan for the clean-up.
+            Guid? coverId = null;
+            string? note = null;
+            if (track.Position == 1 && tags.Cover is not null && await db.Releases.AnyAsync(r => r.Id == id && r.CoverId == null))
+            {
+                string? refusal;
+                (coverId, refusal) = await covers.AcceptEmbeddedAsync(id, tags.Cover);
+                note = refusal is null ? null : $"The cover art in the file was skipped. {refusal}";
+            }
+
+            Track? confirmed = null;
+            var refused = await WithReleaseLockedAsync(db, id, caller, trackId, async release =>
+            {
+                confirmed = release.Tracks.SingleOrDefault(t => t.Id == trackId);
+                if (confirmed is null)
+                {
+                    return Results.NotFound();
+                }
+
+                confirmed.Title = confirmed.TitleTyped ? confirmed.Title : tags.Title ?? confirmed.Title;
+                confirmed.Status = TrackStatus.Converting;
+                confirmed.IsReplacingFailedAudio = false;
+                if (confirmed.Position == 1)
+                {
+                    PreFill(release, tags);
+                    release.CoverId ??= coverId;
+                }
+                await db.SaveChangesAsync();
+                return null;
+            });
+            return refused ?? Results.Ok(new TrackConfirmation(ToSummary(confirmed!), note));
+        });
+
+        // Keeps the Track and its place; the new file then goes through the same upload and confirm as a new one.
+        api.MapPost("/releases/{id:guid}/tracks/{trackId:guid}/replace", async (
+            Guid id, Guid trackId, TrackUploadForm form, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links) =>
+        {
+            Track? replaced = null;
+            List<string> oldBlobNames = [];
+            var refused = await WithReleaseLockedAsync(db, id, caller, startsPendingChange: true, async release =>
+            {
+                var track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
+                if (track is null)
+                {
+                    return Results.NotFound();
+                }
+
+                // On a Published Release, a Track of its own gets new audio as a Pending Change: Members keep hearing
+                // the live audio until it is approved.
+                var replacingLive = release.Stage == ReleaseStage.Published && !track.Pending;
+                if (replacingLive && track.PendingRemoval)
+                {
+                    return Results.Problem("A removed Track's audio can't be replaced.", statusCode: StatusCodes.Status409Conflict);
+                }
+                if (replacingLive ? track.Status is TrackStatus.Uploading or TrackStatus.Converting : track.Status != TrackStatus.Failed)
+                {
+                    return Results.Problem(
+                        replacingLive ? "Wait until the Track's new audio is Ready or Failed." : "Only a Failed Track's audio can be replaced.",
+                        statusCode: StatusCodes.Status409Conflict);
+                }
+
+                if (replacingLive && !track.IsReplaced)
+                {
+                    track.KeepLiveAudio();
+                    release.PendingChanges ??= ReleaseStage.Draft;
+                }
+                else
+                {
+                    oldBlobNames = new[] { track.OriginalBlobName, track.ConvertedBlobName }.OfType<string>().ToList();
+                }
+                track.OriginalBlobName = $"tracks/{trackId}/{Guid.CreateVersion7()}";
+                track.ConvertedBlobName = null;
+                track.Duration = null;
+                track.Status = TrackStatus.Uploading;
+                track.IsReplacingFailedAudio = true;
+                await db.SaveChangesAsync();
+                replaced = track;
+                return null;
+            });
+            if (refused is not null)
+            {
+                return refused;
+            }
+
+            foreach (var blobName in oldBlobNames)
+            {
+                await links.Blob(AudioContainer, blobName).DeleteIfExistsAsync();
+            }
+            var link = await links.ForUploadAsync(AudioContainer, replaced!.OriginalBlobName, replaced.Id);
+            return Results.Ok(new TrackUpload(ToSummary(replaced), link.Url));
+        });
+
+        api.MapPut("/releases/{id:guid}/tracks/order", async (
+            Guid id, TrackOrderForm form, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        {
+            var refused = await WithReleaseLockedAsync(db, id, caller, trackId: null, async release =>
+            {
+                // A list out of step with the Release means someone else added or removed a Track meanwhile.
+                if (form.TrackIds.Count != release.Tracks.Count
+                    || !form.TrackIds.ToHashSet().SetEquals(release.Tracks.Select(t => t.Id)))
+                {
+                    return Results.Problem(
+                        "The Track list has changed. Reload the page and try again.",
+                        statusCode: StatusCodes.Status409Conflict);
+                }
+
+                foreach (var track in release.Tracks)
+                {
+                    track.Position = form.TrackIds.IndexOf(track.Id) + 1;
+                }
+                await db.SaveChangesAsync();
+                return null;
+            });
+            return refused ?? Results.NoContent();
+        });
+
+        api.MapPut("/releases/{id:guid}/tracks/{trackId:guid}", async (
+            Guid id, Guid trackId, TrackForm form, ClaimsPrincipal caller, KleinGeldDbContext db) =>
+        {
+            Track? track = null;
+            // Track details aren't reviewed, so they change at once on a Published Release too (#32).
+            var refused = await db.WithUnsubmittedReleaseLockedAsync(id, caller, async release =>
+            {
+                track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
+                if (track is null)
+                {
+                    return Results.NotFound();
+                }
+
+                track.TitleTyped |= track.Title != form.Title.Trim();
+                track.Title = form.Title.Trim();
+                track.SingleMark = form.SingleMark;
+                track.FeaturedArtists = string.IsNullOrWhiteSpace(form.FeaturedArtists) ? null : form.FeaturedArtists.Trim();
+                track.Explicit = form.Explicit;
+                await db.SaveChangesAsync();
+                return null;
+            });
+            return refused ?? Results.Ok(ToSummary(track!));
+        });
+
+        api.MapDelete("/releases/{id:guid}/tracks/{trackId:guid}", (
+            Guid id, Guid trackId, ClaimsPrincipal caller, KleinGeldDbContext db, BlobLinks links) =>
+            RemoveAsync(db, links, id, trackId, caller));
+    }
+
+    /// <summary>
+    /// Takes a Track off its Release, closes the gap in the Track numbers and deletes its blob at once. The database
+    /// goes first: a blob left behind by a failure is an orphan the daily clean-up finds, a Track without audio isn't.
+    /// </summary>
+    private static async Task<IResult> RemoveAsync(KleinGeldDbContext db, BlobLinks links, Guid id, Guid trackId, ClaimsPrincipal caller)
+    {
+        List<string> blobNames = [];
+        var refused = await WithReleaseLockedAsync(db, id, caller, startsPendingChange: true, async release =>
+        {
+            var track = release.Tracks.SingleOrDefault(t => t.Id == trackId);
+            if (track is null)
+            {
+                return Results.NotFound();
+            }
+
+            // A Published Release's own Track only goes once its Pending Changes are approved; any new audio it was
+            // waiting on goes now.
+            if (release.Stage == ReleaseStage.Published && !track.Pending)
+            {
+                if (track.IsReplaced)
+                {
+                    blobNames = new[] { track.OriginalBlobName, track.ConvertedBlobName }.OfType<string>().ToList();
+                    track.RestoreLiveAudio();
+                }
+                track.PendingRemoval = true;
+                release.PendingChanges ??= ReleaseStage.Draft;
+                await db.SaveChangesAsync();
+                return null;
+            }
+
+            blobNames = track.BlobNames().ToList();
+            db.Tracks.Remove(track);
+            foreach (var later in release.Tracks.Where(t => t.Position > track.Position))
+            {
+                later.Position--;
+            }
+            if (release.Tracks.All(t => t == track || !t.IsPendingChange))
+            {
+                release.PendingChanges = null;
+            }
+            await db.SaveChangesAsync();
+            return null;
+        });
+        if (refused is not null)
+        {
+            return refused;
+        }
+
+        foreach (var blobName in blobNames)
+        {
+            await links.Blob(AudioContainer, blobName).DeleteIfExistsAsync();
+        }
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Changes a Release's Track list while holding a lock on the Release, so concurrent uploads can't get past the
+    /// Track limit or share a Track number. Answers "not found" to anyone who doesn't manage the Artist, and refuses
+    /// a Release that can't be edited. A Published Release takes added, removed and replaced Tracks, and changes to
+    /// those, as its Pending Changes while they aren't Submitted; nothing else about its own Tracks changes here.
+    /// <paramref name="change"/> returns null when it succeeded.
+    /// </summary>
+    private static Task<IResult?> WithReleaseLockedAsync(
+        KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, Guid? trackId, Func<Release, Task<IResult?>> change) =>
+        WithReleaseLockedAsync(db, id, caller, startsPendingChange: false, change, trackId);
+
+    private static Task<IResult?> WithReleaseLockedAsync(
+        KleinGeldDbContext db, Guid id, ClaimsPrincipal caller, bool startsPendingChange, Func<Release, Task<IResult?>> change, Guid? trackId = null) =>
+        db.WithManagedReleaseLockedAsync(id, caller, release =>
+        {
+            if (release.Stage is ReleaseStage.Draft or ReleaseStage.Rejected)
+            {
+                return change(release);
+            }
+            if (release.Stage != ReleaseStage.Published)
+            {
+                return Refuse("Tracks can only be changed on a Draft or Rejected Release.");
+            }
+            if (release.PendingChanges == ReleaseStage.Submitted)
+            {
+                return Refuse("Submitted Pending Changes can't be changed. Withdraw them first.");
+            }
+            var changesPendingTrack = trackId is { } changed && release.Tracks.Any(t => t.Id == changed && (t.Pending || t.IsReplaced));
+            return startsPendingChange || changesPendingTrack
+                ? change(release)
+                : Refuse("A Published Release's own Tracks can only be added, removed or replaced, as Pending Changes.");
+        });
+
+    private static Task<IResult?> Refuse(string problem) =>
+        Task.FromResult<IResult?>(Results.Problem(problem, statusCode: StatusCodes.Status409Conflict));
+
+    private static void PreFill(Release release, EmbeddedTags tags)
+    {
+        if (release.Title.Length == 0 && tags.Album is not null)
+        {
+            release.Title = tags.Album;
+            release.Slug = Slugs.From(release.Title);
+        }
+        release.ReleaseDate ??= tags.Date;
+        release.Genre ??= tags.Genre;
+    }
+
+    private static string TitleFrom(string fileName)
+    {
+        var title = Path.GetFileNameWithoutExtension(fileName.Trim());
+        title = string.IsNullOrWhiteSpace(title) ? fileName.Trim() : title;
+        return title.Length > ReleaseForm.TitleMaxLength ? title[..ReleaseForm.TitleMaxLength] : title;
+    }
+
+    internal static TrackSummary ToSummary(Track track) => ToSummary(track, seesPendingChanges: true);
+
+    /// <summary>A Member who doesn't see Pending Changes sees a replaced Track as its live audio, and nothing removed.</summary>
+    internal static TrackSummary ToSummary(Track track, bool seesPendingChanges) =>
+        seesPendingChanges || !track.IsReplaced
+            ? new(track.Id, track.Title, track.Position, track.Status, track.SingleMark, track.FeaturedArtists, track.Explicit,
+                track.Duration, track.Pending, Removed: seesPendingChanges && track.PendingRemoval, Replaced: seesPendingChanges && track.IsReplaced)
+            : new(track.Id, track.Title, track.Position, TrackStatus.Ready, track.SingleMark, track.FeaturedArtists, track.Explicit,
+                track.LiveDuration);
+}

@@ -1,0 +1,78 @@
+@page "/artists"
+@attribute [Authorize]
+@inject HttpClient Http
+
+@* The A–Z grid of Artists with a Published Release, the same for every Member. *@
+
+<PageTitle>Artists · KleinGeld Music</PageTitle>
+
+<h1>Artists</h1>
+
+@if (_problem is not null)
+{
+    <p role="alert">@_problem</p>
+}
+
+@if (_loaded && _artists.Count == 0)
+{
+    <p>No Artists yet.</p>
+}
+else if (!_loaded && _problem is null)
+{
+    <p>Loading…</p>
+}
+
+<ul class="card-grid">
+    @foreach (var artist in _artists)
+    {
+        <li @key="artist.Id">
+            <a href="artists/@artist.Id/@artist.Slug">
+                @if (artist.Cover is not null)
+                {
+                    <img class="cover-art" src="@artist.Cover.Small" alt="" loading="lazy" />
+                }
+                else
+                {
+                    <span class="cover-missing"></span>
+                }
+                <span>@artist.Name</span>
+            </a>
+        </li>
+    }
+</ul>
+
+@if (_next is not null)
+{
+    <p><button type="button" disabled="@_loading" @onclick="LoadAsync">Load more</button></p>
+}
+
+@code {
+    private readonly List<ArtistCard> _artists = [];
+    private string? _next;
+    private bool _loaded;
+    private bool _loading;
+    private string? _problem;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _problem = null;
+        try
+        {
+            var page = await Http.GetFromJsonAsync<ArtistList>(_next is { } next ? $"api/artists?after={next}" : "api/artists");
+            _artists.AddRange(page!.Artists);
+            _next = page.Next;
+            _loaded = true;
+        }
+        catch (HttpRequestException)
+        {
+            _problem = "Something went wrong. Reload the page and try again.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

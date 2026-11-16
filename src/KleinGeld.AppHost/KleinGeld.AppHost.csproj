@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="..\KleinGeld.Web\KleinGeld.Web.csproj" />
     <ProjectReference Include="..\KleinGeld.Migrator\KleinGeld.Migrator.csproj" />
+    <ProjectReference Include="..\KleinGeld.Worker\KleinGeld.Worker.csproj" />
   </ItemGroup>
 
 </Project>

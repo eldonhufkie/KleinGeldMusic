@@ -1,0 +1,119 @@
+@page "/releases"
+@attribute [Authorize]
+@inject HttpClient Http
+
+@* Every Published Release, by type and sort. Changing either starts the list over; Load more adds the next page. *@
+
+<PageTitle>Releases · KleinGeld Music</PageTitle>
+
+<h1>Releases</h1>
+
+<div class="release-filters">
+    <div class="release-chips" role="group" aria-label="Type">
+        @foreach (var (label, type) in Chips)
+        {
+            <button type="button" class="release-chip" aria-pressed="@(_type == type ? "true" : "false")" @onclick="() => FilterAsync(type)">@label</button>
+        }
+    </div>
+    <label>
+        Sort
+        <select value="@_sort" @onchange="SortAsync">
+            <option value="@ReleaseSort.Newest">Newest</option>
+            <option value="@ReleaseSort.AZ">A–Z</option>
+        </select>
+    </label>
+</div>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+
+@if (_releases.Count > 0)
+{
+    <ReleaseGrid Releases="_releases" />
+}
+else if (_loading)
+{
+    <p>Loading…</p>
+}
+else if (!_failed)
+{
+    <p>Nothing here yet.</p>
+}
+
+@if (_next is not null)
+{
+    <button type="button" disabled="@_loading" @onclick="LoadAsync">@(_loading ? "Loading…" : "Load more")</button>
+}
+
+@code {
+    private static readonly (string Label, ReleaseType? Type)[] Chips =
+    [
+        ("All", null),
+        ("Albums", ReleaseType.Album),
+        ("EPs", ReleaseType.EP),
+        ("Singles", ReleaseType.Single),
+    ];
+
+    private readonly List<ReleaseCard> _releases = [];
+    private ReleaseType? _type;
+    private ReleaseSort _sort = ReleaseSort.Newest;
+    private string? _next;
+    private bool _loading;
+    private bool _failed;
+
+    // Counts the lists asked for, so an answer to an earlier filter can't land in a later one.
+    private int _listId;
+
+    protected override Task OnInitializedAsync() => StartOverAsync();
+
+    private Task FilterAsync(ReleaseType? type)
+    {
+        _type = type;
+        return StartOverAsync();
+    }
+
+    private Task SortAsync(ChangeEventArgs e)
+    {
+        _sort = Enum.Parse<ReleaseSort>((string)e.Value!);
+        return StartOverAsync();
+    }
+
+    private Task StartOverAsync()
+    {
+        _listId++;
+        _releases.Clear();
+        _next = null;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var listId = _listId;
+        _loading = true;
+        _failed = false;
+
+        var url = $"api/releases?sort={_sort}";
+        url += _type is { } type ? $"&type={type}" : "";
+        url += _next is { } next ? $"&after={next}" : "";
+
+        try
+        {
+            var page = await Http.GetFromJsonAsync<ReleaseList>(url);
+            if (listId == _listId)
+            {
+                _releases.AddRange(page!.Items);
+                _next = page.Next;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed |= listId == _listId;
+        }
+        finally
+        {
+            _loading = _loading && listId != _listId;
+        }
+    }
+}

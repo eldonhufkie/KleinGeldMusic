@@ -74,6 +74,14 @@ public sealed class KleinGeldApp : IAsyncLifetime
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>Runs the daily clean-up of unattached uploads now, by the time the web host's clock shows.</summary>
+    public async Task RunUploadCleanUpAsync()
+    {
+        using var client = CreateWebClient();
+        using var response = await client.PostAsync("/testing/upload-clean-up", null);
+        response.EnsureSuccessStatusCode();
+    }
+
     /// <summary>Changes a Member's security stamp, as a password change or a Remove would.</summary>
     public async Task ChangeSecurityStampAsync(string email)
     {
@@ -81,6 +89,47 @@ public sealed class KleinGeldApp : IAsyncLifetime
         using var response = await client.PostAsJsonAsync("/testing/security-stamp", email);
         response.EnsureSuccessStatusCode();
     }
+
+    /// <summary>Puts this many Unavailable Tracks on a Playlist, which adding one by one would take too long for.</summary>
+    public async Task FillPlaylistAsync(Guid playlistId, int count)
+    {
+        using var client = CreateWebClient();
+        using var response = await client.PostAsJsonAsync($"/testing/playlists/{playlistId}/filler", count);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>How many Join Requests with this email are stored, of any status.</summary>
+    public async Task<int> CountJoinRequestsAsync(string email)
+    {
+        using var client = CreateWebClient();
+        return await client.GetFromJsonAsync<int>($"/testing/join-requests/count?email={Uri.EscapeDataString(email)}");
+    }
+
+    /// <summary>The reason as stored, which the API only shows while the Release is Rejected.</summary>
+    public async Task<string?> ReadStoredRejectionReasonAsync(Guid releaseId)
+    {
+        using var client = CreateWebClient();
+        return await client.GetFromJsonAsync<string?>($"/testing/releases/{releaseId}/rejection-reason");
+    }
+
+    /// <summary>Adds Artists with a Published Release straight to the database, for lists longer than one load.</summary>
+    public async Task SeedPublishedArtistsAsync(IEnumerable<string> names)
+    {
+        using var client = CreateWebClient();
+        using var response = await client.PostAsJsonAsync("/testing/published-artists", names);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>Adds an Artist with one Release of one Track straight to the database, Published or left a Draft.</summary>
+    public async Task SeedSearchCatalogAsync(SeededCatalog catalog)
+    {
+        using var client = CreateWebClient();
+        using var response = await client.PostAsJsonAsync("/testing/search-catalog", catalog);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public sealed record SeededCatalog(
+        string ArtistName, string ReleaseTitle, string TrackTitle, string? FeaturedArtists = null, bool Published = true);
 
     public async Task DisposeAsync()
     {

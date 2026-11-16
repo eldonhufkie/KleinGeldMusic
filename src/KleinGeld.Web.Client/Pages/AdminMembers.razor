@@ -1,0 +1,125 @@
+@page "/admin/members"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inject HttpClient Http
+
+@* Every Member. Remove shows what goes with them, as Leave does, and needs a reason for email 10. *@
+
+<PageTitle>Members · KleinGeld Music</PageTitle>
+
+<h1>Members</h1>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+
+@if (_members is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <ul class="member-list">
+        @foreach (var member in _members)
+        {
+            <li class="member-list-item">
+                <p><strong>@member.Email</strong>@(member.IsAdmin ? " (Admin)" : "")</p>
+                @if (!member.IsAdmin && _removing != member.Id)
+                {
+                    <div class="member-list-actions">
+                        <button type="button" class="btn btn-danger" @onclick="() => ShowRemoveAsync(member)">Remove…</button>
+                    </div>
+                }
+                @if (_removing == member.Id)
+                {
+                    @if (_preview is null)
+                    {
+                        <p>Loading…</p>
+                    }
+                    else
+                    {
+                        <p>Removing them is for good. This also deletes:</p>
+                        <DeletionPreviewList Preview="_preview" />
+                        <EditForm Model="_form" OnValidSubmit="() => RemoveAsync(member)">
+                            <DataAnnotationsValidator />
+                            <label for="remove-reason">Reason (sent to them)</label>
+                            <InputTextArea id="remove-reason" @bind-Value="_form.Reason" maxlength="@RemoveForm.ReasonMaxLength" />
+                            <ValidationMessage For="() => _form.Reason" />
+                            <div class="member-list-actions">
+                                <button type="button" class="btn" disabled="@_busy" @onclick="Cancel">Cancel</button>
+                                <button type="submit" class="btn btn-danger" disabled="@_busy">@(_busy ? "Removing…" : "Remove for good")</button>
+                            </div>
+                        </EditForm>
+                    }
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private List<MemberListing>? _members;
+    private Guid? _removing;
+    private DeletionPreview? _preview;
+    private RemoveForm _form = new();
+    private bool _busy;
+    private bool _failed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _members = await Http.GetFromJsonAsync<List<MemberListing>>("api/admin/members");
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+
+    private async Task ShowRemoveAsync(MemberListing member)
+    {
+        _removing = member.Id;
+        _preview = null;
+        _form = new();
+        _failed = false;
+        try
+        {
+            _preview = await Http.GetFromJsonAsync<DeletionPreview>($"api/admin/members/{member.Id}/remove");
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+            _removing = null;
+        }
+    }
+
+    private void Cancel() => _removing = null;
+
+    private async Task RemoveAsync(MemberListing member)
+    {
+        _busy = true;
+        _failed = false;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync($"api/admin/members/{member.Id}/remove", _form);
+            if (response.IsSuccessStatusCode)
+            {
+                _members!.Remove(member);
+                _removing = null;
+            }
+            else
+            {
+                _failed = true;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

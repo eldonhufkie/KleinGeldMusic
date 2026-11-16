@@ -1,0 +1,67 @@
+@page "/playlists"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IPlaylistsState MyPlaylists
+@implements IDisposable
+
+@* The Member's own Playlists, most recently changed first, and the form that creates one. *@
+
+<PageTitle>Playlists · KleinGeld Music</PageTitle>
+
+<h1>Playlists</h1>
+
+<EditForm Model="_form" OnValidSubmit="CreateAsync" FormName="new-playlist">
+    <DataAnnotationsValidator />
+    <label>
+        New Playlist
+        <InputText @bind-Value="_form.Name" maxlength="@PlaylistForm.NameMaxLength" />
+    </label>
+    <button type="submit" disabled="@_creating">Create</button>
+    <ValidationMessage For="() => _form.Name" />
+</EditForm>
+@if (_problem is not null)
+{
+    <p role="alert">@_problem</p>
+}
+
+<PlaylistList />
+
+@code {
+    private readonly PlaylistForm _form = new();
+    private bool _creating;
+    private string? _problem;
+
+    protected override void OnInitialized() => MyPlaylists.Changed += OnChanged;
+
+    private void OnChanged() => StateHasChanged();
+
+    private async Task CreateAsync()
+    {
+        _creating = true;
+        _problem = null;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync("api/playlists", _form);
+            if (!response.IsSuccessStatusCode)
+            {
+                _problem = "This Playlist couldn't be created. Check the name and try again.";
+                return;
+            }
+
+            var created = (await response.Content.ReadFromJsonAsync<PlaylistSummary>())!;
+            await MyPlaylists.LoadAsync();
+            Navigation.NavigateTo($"playlists/{created.Id}/{created.Slug}");
+        }
+        catch (HttpRequestException)
+        {
+            _problem = "Something went wrong. Try again.";
+        }
+        finally
+        {
+            _creating = false;
+        }
+    }
+
+    public void Dispose() => MyPlaylists.Changed -= OnChanged;
+}

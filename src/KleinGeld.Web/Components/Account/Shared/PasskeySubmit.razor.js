@@ -39,7 +39,17 @@ async function requestCredential(email, mediation, headers, signal) {
     return await navigator.credentials.get({ publicKey: options, mediation, signal });
 }
 
-customElements.define('passkey-submit', class extends HTMLElement {
+// A passkey assertion for any signed-in Member, as the Leave page asks for; the server checks it is theirs.
+export async function requestCredentialJson(requestTokenName, requestTokenValue) {
+    if (!browserSupportsPasskeys) {
+        throw new Error('Some passkey features are missing. Please update your browser.');
+    }
+    const credential = await requestCredential('', undefined, { [requestTokenName]: requestTokenValue });
+    return JSON.stringify(credential);
+}
+
+// Imported again from the Leave page under another URL, so the element may already be defined.
+if (!customElements.get('passkey-submit')) customElements.define('passkey-submit', class extends HTMLElement {
     static formAssociated = true;
 
     connectedCallback() {

@@ -1,0 +1,39 @@
+@inject HttpClient Http
+
+@* The 12 most recently Published Releases, on the home page. *@
+
+<h2>New Releases</h2>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+else if (_releases is null)
+{
+    <p>Loading…</p>
+}
+else if (_releases.Count == 0)
+{
+    <p>Nothing has been Published yet.</p>
+}
+else
+{
+    <ReleaseGrid Releases="_releases" />
+}
+
+@code {
+    private List<ReleaseCard>? _releases;
+    private bool _failed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _releases = await Http.GetFromJsonAsync<List<ReleaseCard>>("api/releases/new");
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+}
