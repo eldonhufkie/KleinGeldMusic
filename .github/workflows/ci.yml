@@ -1,8 +1,10 @@
 name: CI
 
-# Builds and tests every push and pull request. A push to main also publishes images and compose files. Never deploys.
+# Builds and tests every pull request, and every merge into develop or main (a merge is a push to that branch).
+# Feature branches get one run, from their pull request. A push to main also publishes images and compose files. Never deploys.
 on:
   push:
+    branches: [develop, main]
   pull_request:
 
 permissions:
