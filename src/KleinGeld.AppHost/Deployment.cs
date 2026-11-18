@@ -15,7 +15,7 @@ internal enum Copy
 /// Which copy of the app `aspire publish` writes the compose file for, and where its datasets are.
 /// Set at publish time, e.g. <c>Deploy__Copy=Test Deploy__Pool=tank aspire publish</c>.
 /// </summary>
-/// <param name="DataPath">The copy's dataset on the host, <c>/mnt/&lt;pool&gt;/kleingeld/production</c> or <c>…/test</c>.</param>
+/// <param name="DataPath">The copy's dataset on the host, <c>/mnt/&lt;pool&gt;/Applications/kleingeld/production</c> or <c>…/test</c>.</param>
 internal sealed record Deployment(Copy Copy, string DataPath)
 {
     public const string RestartUnlessStopped = "unless-stopped";

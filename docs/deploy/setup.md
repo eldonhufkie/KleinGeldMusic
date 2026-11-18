@@ -11,11 +11,15 @@ Deploy__Copy=Test Deploy__Pool=tank aspire publish --apphost src/KleinGeld.AppHo
 ## GitHub
 
 - Set the repository variable `TRUENAS_POOL` (Settings → Secrets and variables → Actions → Variables). The publish job fails without it.
+- Set the repository variables `TRUENAS_HOST` (the TrueNAS tailnet name, e.g. `truenas`) and `TRUENAS_KNOWN_HOSTS` (the output of `ssh-keyscan truenas` run from a tailnet machine).
+- Add the repository secrets `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_SECRET` (a Tailscale OAuth client with the `auth_keys` write scope for `tag:ci`) and `DEPLOY_SSH_KEY` (the private half of the `deploy` key below).
+- In the Tailscale ACL, let `tag:ci` reach only TrueNAS port 22, e.g. a grant `{"src": ["tag:ci"], "dst": ["truenas"], "ip": ["tcp:22"]}` with `tag:ci` owned by the admin in `tagOwners`. The OAuth client makes each runner an ephemeral device.
+- Create the Environments `test` (no rules) and `production` (required reviewer: the owner). The deploy job waits on `production` before deploying to Production.
 - After the first push to `main`, make the `kleingeld-web` and `kleingeld-migrator` GHCR packages public (package settings → Change visibility), so TrueNAS pulls without credentials. CI keeps the last 10 versions of each.
 
 ## Datasets and ownership
 
-Each copy lives under `/mnt/<pool>/kleingeld/{production,test}` with `secrets.env` (mode 600, from `docs/deploy/<copy>/secrets.env.example`) and `release.env` (`docs/deploy/release.env.example`).
+Each copy lives under `/mnt/<pool>/Applications/kleingeld/{production,test}` with `secrets.env` (mode 600, from `docs/deploy/<copy>/secrets.env.example`) and `release.env` (`docs/deploy/release.env.example`).
 
 | Folder | Container user | Command |
 | --- | --- | --- |
@@ -33,3 +37,45 @@ All bound to 127.0.0.1; Tailscale fronts them (Funnel for Production, `serve` fo
 | Test | web | 8081 |
 | Test | MailPit inbox | 8025 |
 | Test | Azurite blobs | 10000 |
+
+## Deploying
+
+A push to `main` builds and publishes the images (tagged with the commit SHA) and the compose files, deploys to Test, then waits on the `production` Environment. Approving it deploys the **same** SHA to Production; nothing is rebuilt.
+
+Each deploy job joins the tailnet as an ephemeral `tag:ci` device and runs
+
+```sh
+ssh deploy@$TRUENAS_HOST "deploy test|prod <sha>" < docker-compose.yaml
+```
+
+### The `deploy` user and `deploy.sh`
+
+1. Copy [`deploy/deploy.sh`](../../deploy/deploy.sh) to `/mnt/<pool>/Applications/kleingeld/deploy.sh`, owned by root and mode 755. The script writes into the `production` and `test` folders next to it, so that folder must not be writable by `deploy`.
+2. Create the `deploy` user (Credentials → Users) with a home directory and SSH access, no password login, and under **Allowed sudo commands with no password** exactly `/mnt/<pool>/Applications/kleingeld/deploy.sh` (it runs `midclt`, which needs root).
+3. Generate a key pair (`ssh-keygen -t ed25519 -C kleingeld-ci -f deploy`), store the private half as the `DEPLOY_SSH_KEY` secret, and paste the public half into the user's authorized keys locked to the forced command:
+
+   ```text
+   command="sudo -n /mnt/<pool>/Applications/kleingeld/deploy.sh \"$SSH_ORIGINAL_COMMAND\"",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAA... kleingeld-ci
+   ```
+
+The key is effectively root on TrueNAS: whoever holds it can deploy any compose file, privileged containers included. Keep it only in the GitHub secret and rotate it if it leaks.
+
+`deploy.sh` accepts only `deploy test <sha>` or `deploy prod <sha>` (a full 40-character commit SHA), with the compose file on stdin. It writes `docker-compose.yaml` and `release.env` into the copy's folder and runs `midclt call app.redeploy kleingeld-test` or `… kleingeld`. Its tests run in CI: `bash deploy/deploy.test.sh`.
+
+## Rolling back
+
+Every published version is a commit SHA; GHCR keeps the last 10 of each image.
+
+1. Pick an earlier SHA from the `main` history (or the Actions runs) whose images are still in GHCR.
+2. On TrueNAS (System → Shell, as root), set it in the copy's `release.env`, e.g. for Production:
+
+   ```sh
+   echo "KLEINGELD_TAG=<earlier sha>" > /mnt/<pool>/Applications/kleingeld/production/release.env
+   midclt call app.redeploy kleingeld
+   ```
+
+   For Test, use the `test` folder and `kleingeld-test`.
+3. A rollback keeps the current compose file. If the earlier version needs its own compose file, re-run that version's deploy job from the Actions tab instead.
+4. Migrations only move forward: rolling back past a version that changed the schema needs a database restore (see the backups setup), not just a tag change.
+
+The next push to `main` deploys over a rollback as usual.
