@@ -1,0 +1,23 @@
+{
+  "name": "kleingeld-e2e",
+  "version": "1.0.0",
+  "description": "Playwright browser tests for KleinGeld Music",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report",
+    "typecheck": "tsc",
+    "test:p0": "playwright test --grep \\[P0\\]"
+  },
+  "type": "commonjs",
+  "devDependencies": {
+    "@faker-js/faker": "^10.6.0",
+    "@playwright/test": "^1.65.1",
+    "@seontechnologies/playwright-utils": "^4.6.1",
+    "@types/node": "^26.6.6",
+    "dotenv": "^18.0.10",
+    "typescript": "^7.0.2"
+  },
+  "private": true
+}
