@@ -4,6 +4,7 @@ name: CI
 # deploys them to Test, and deploys the same tag to Production once the `production` Environment is approved.
 on:
   push:
+    branches: [develop, main]
   pull_request:
 
 permissions:
