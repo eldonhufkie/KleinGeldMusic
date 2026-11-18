@@ -136,9 +136,13 @@ else
 
 builder.Build().Run();
 
+// MailPit:Port pins the inbox's address in run mode, so the browser tests in e2e/ can read setup emails.
 IResourceBuilder<ContainerResource> AddMailPit() =>
     builder.AddContainer("mailpit", "axllent/mailpit")
-        .WithHttpEndpoint(targetPort: 8025, name: "http")
+        .WithHttpEndpoint(
+            port: int.TryParse(builder.Configuration["MailPit:Port"], out var mailPitPort) ? mailPitPort : null,
+            targetPort: 8025,
+            name: "http")
         .WithEndpoint(targetPort: 1025, name: "smtp", scheme: "tcp");
 
 void SendEmailToMailPit(IResourceBuilder<ContainerResource> mailpit)

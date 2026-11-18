@@ -12,10 +12,15 @@ export function attach(list, dotNet) {
         event.preventDefault();
         const row = handle.closest("[data-track-id]");
         const original = rowsOf(list);
-        handle.setPointerCapture(event.pointerId);
+        const pointerId = event.pointerId;
         row.classList.add("track-dragging");
 
+        // Listen on the document, not by capturing the pointer on the handle: moving the row takes the handle out of
+        // the DOM, which releases any capture, and the drop would then never arrive.
         const move = moved => {
+            if (moved.pointerId !== pointerId) {
+                return;
+            }
             const over = document.elementFromPoint(moved.clientX, moved.clientY)?.closest("[data-track-id]");
             if (!over || over === row || !list.contains(over)) {
                 return;
@@ -24,9 +29,12 @@ export function attach(list, dotNet) {
             over.parentNode.insertBefore(row, rows.indexOf(row) < rows.indexOf(over) ? over.nextSibling : over);
         };
         const finish = ended => {
-            handle.removeEventListener("pointermove", move);
-            handle.removeEventListener("pointerup", finish);
-            handle.removeEventListener("pointercancel", finish);
+            if (ended.pointerId !== pointerId) {
+                return;
+            }
+            document.removeEventListener("pointermove", move);
+            document.removeEventListener("pointerup", finish);
+            document.removeEventListener("pointercancel", finish);
             row.classList.remove("track-dragging");
 
             const order = idsOf(rowsOf(list));
@@ -35,9 +43,9 @@ export function attach(list, dotNet) {
                 dotNet.invokeMethodAsync("Reorder", order);
             }
         };
-        handle.addEventListener("pointermove", move);
-        handle.addEventListener("pointerup", finish);
-        handle.addEventListener("pointercancel", finish);
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", finish);
+        document.addEventListener("pointercancel", finish);
     });
 
     list.addEventListener("keydown", event => {
