@@ -1,7 +1,7 @@
 name: CI
 
-# Builds and tests every pull request, and every merge into develop or main (a merge is a push to that branch).
-# Feature branches get one run, from their pull request. A push to main also publishes images and compose files. Never deploys.
+# Builds and tests every push and pull request. A push to main also publishes images and compose files,
+# deploys them to Test, and deploys the same tag to Production once the `production` Environment is approved.
 on:
   push:
     branches: [develop, main]
@@ -42,8 +42,11 @@ jobs:
       - name: Test
         run: dotnet test KleinGeldMusic.slnx --no-build
 
-  # A push to main publishes the release: images tagged with the commit SHA and the compose files
-  # for both copies. Deploying them is a separate job (#48).
+      - name: Test deploy.sh
+        run: bash deploy/deploy.test.sh
+
+  # A push to main publishes the version: images tagged with the commit SHA and the compose files
+  # for both copies. The deploy jobs below apply them.
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build-and-test
@@ -90,7 +93,7 @@ jobs:
               -p:ContainerImageTags="${{ github.sha }}"
           done
 
-      # The generated compose files are build output, never committed; #48 deploys them.
+      # The generated compose files are build output, never committed; the deploy jobs send them to TrueNAS.
       - name: Generate the compose files
         run: |
           for copy in production test; do
@@ -103,6 +106,21 @@ jobs:
           name: compose
           path: compose/*/docker-compose.yaml
           if-no-files-found: error
+
+  # Deploys automatically to Test, then the same tag to Production after the production approval. Nothing is rebuilt.
+  deploy-test:
+    needs: publish
+    uses: ./.github/workflows/deploy.yml
+    with:
+      copy: test
+    secrets: inherit
+
+  deploy-production:
+    needs: deploy-test
+    uses: ./.github/workflows/deploy.yml
+    with:
+      copy: production
+    secrets: inherit
 
   # Keeps the last 10 versions of each image. A new GHCR package starts private: make it public once
   # in its package settings, so the server pulls without credentials.
