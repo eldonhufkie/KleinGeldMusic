@@ -1,0 +1,20 @@
+namespace KleinGeld.Contracts;
+
+/// <summary>
+/// A Track on a Release's Track list, as returned by <c>GET /api/tracks?releaseId={id}</c>.
+/// <paramref name="Duration"/> is known once the Track is Ready. <paramref name="Pending"/> marks a Track added in
+/// Pending Changes, which only managers and the Admin see; so do <paramref name="Removed"/> (removed in them) and
+/// <paramref name="Replaced"/> (its new audio awaits review).
+/// </summary>
+public sealed record TrackSummary(
+    Guid Id,
+    string Title,
+    int Position,
+    TrackStatus Status,
+    bool SingleMark = false,
+    string? FeaturedArtists = null,
+    bool Explicit = false,
+    TimeSpan? Duration = null,
+    bool Pending = false,
+    bool Removed = false,
+    bool Replaced = false);

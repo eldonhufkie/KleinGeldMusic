@@ -1,3 +1,5 @@
+using KleinGeld.Contracts;
+using KleinGeld.Data;
 using MimeKit;
 
 namespace KleinGeld.Web.Email;
@@ -32,6 +34,19 @@ internal static class MemberEmails
             "KleinGeld Music",
         ]));
 
+    /// <summary>Email 8: the Admin Rejected a Release, with the reason.</summary>
+    public static OutgoingEmail ReleaseRejected(MailboxAddress manager, Release release) =>
+        new(manager, $"{release.Title} was rejected", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin rejected \"{release.Title}\" by {release.Artist.Name}:",
+            "",
+            release.RejectionReason!,
+            "",
+            "You can edit it under My Artists and submit it again.",
+        ]));
+
     /// <summary>Email 3: Forgot password, with the link to choose a new one.</summary>
     public static OutgoingEmail PasswordReset(MailboxAddress member, Uri setPasswordLink) =>
         new(member, "Reset your KleinGeld Music password", string.Join(Environment.NewLine,
@@ -44,5 +59,80 @@ internal static class MemberEmails
             setPasswordLink.ToString(),
             "",
             "The link works for 15 minutes. If you didn't ask for this, you can ignore this email.",
+        ]));
+
+    /// <summary>Email 4: sent to the new address, with the link that makes it the Member's login email.</summary>
+    public static OutgoingEmail ConfirmNewEmail(MailboxAddress newAddress, Uri confirmLink) =>
+        new(newAddress, "Confirm your new KleinGeld Music email", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            "Someone asked to use this email address to log in to KleinGeld Music.",
+            "Confirm it here, and it replaces the old one:",
+            "",
+            confirmLink.ToString(),
+            "",
+            "The link works for 15 minutes. If you didn't ask for this, you can ignore this email.",
+        ]));
+
+    /// <summary>Email 7: the Admin approved a Release of an Artist the Member manages.</summary>
+    public static OutgoingEmail ReleaseApproved(MailboxAddress manager, Release release) =>
+        new(manager, $"{release.Title} is Published", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin approved \"{release.Title}\" by {release.Artist.Name}. It's Published: every Member can now listen to it.",
+        ]));
+
+    /// <summary>Email 7, for the Pending Changes of a Published Release.</summary>
+    public static OutgoingEmail PendingChangesApproved(MailboxAddress manager, Release release) =>
+        new(manager, $"Pending Changes to {release.Title} are Published", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin approved the Pending Changes to \"{release.Title}\" by {release.Artist.Name}. Every Member can now listen to the added Tracks.",
+        ]));
+
+    /// <summary>Email 8, for the Pending Changes of a Published Release.</summary>
+    public static OutgoingEmail PendingChangesRejected(MailboxAddress manager, Release release) =>
+        new(manager, $"Pending Changes to {release.Title} were rejected", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin rejected the Pending Changes to \"{release.Title}\" by {release.Artist.Name}:",
+            "",
+            release.PendingChangesRejectionReason!,
+            "",
+            "The Release stays Published as it was. You can change them under My Artists and submit them again.",
+        ]));
+
+    /// <summary>Email 9: the Admin deleted a Release or Artist the Member manages, with the reason.</summary>
+    public static OutgoingEmail DeletedByAdmin(MailboxAddress manager, string what, string reason) =>
+        new(manager, $"{what} was deleted", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            $"The Admin deleted {what}:",
+            "",
+            reason,
+            "",
+            "It's gone for good, with its Tracks and covers.",
+        ]));
+
+    /// <summary>Email 10: the Admin Removed the Member, with the reason and the Artists deleted with them.</summary>
+    public static OutgoingEmail Removed(MailboxAddress person, string reason, IReadOnlyList<DeletedArtist> artists) =>
+        new(person, "You were Removed from KleinGeld Music", string.Join(Environment.NewLine,
+        [
+            "Hi,",
+            "",
+            "The Admin Removed you from KleinGeld Music:",
+            "",
+            reason,
+            "",
+            .. artists.Count == 0
+                ? (string[])["You are no longer a Member, and your Playlists are gone for good."]
+                : ["You are no longer a Member, and your Playlists are gone for good. So are the Artists only you managed, with their Releases:", .. artists.Select(a => $"- {a.Name}")],
+            "",
+            DeletionPreview.BackupWording,
         ]));
 }

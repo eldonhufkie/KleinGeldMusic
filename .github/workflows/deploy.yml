@@ -1,0 +1,73 @@
+name: Deploy
+
+# Deploys one published version to one copy on TrueNAS. Called by CI after a push to main: Test first,
+# then Production once the `production` Environment is approved. Nothing is built here; the compose file
+# comes from the publish job's artifact and the images are the ones it pushed, tagged with the commit SHA.
+on:
+  workflow_call:
+    inputs:
+      copy:
+        description: test or production
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Production waits here for the required reviewer.
+    environment: ${{ inputs.copy == 'production' && 'production' || 'test' }}
+    concurrency:
+      group: deploy-${{ inputs.copy }}
+      cancel-in-progress: false
+    env:
+      TRUENAS_HOST: ${{ vars.TRUENAS_HOST }}
+    steps:
+      - name: Check the copy and settings
+        env:
+          COPY: ${{ inputs.copy }}
+          KNOWN_HOSTS: ${{ vars.TRUENAS_KNOWN_HOSTS }}
+          HAS_KEY: ${{ secrets.DEPLOY_SSH_KEY != '' }}
+          HAS_TS: ${{ secrets.TS_OAUTH_CLIENT_ID != '' && secrets.TS_OAUTH_SECRET != '' }}
+        run: |
+          case "$COPY" in test|production) ;; *) echo "Unknown copy '$COPY'"; exit 1 ;; esac
+          missing=""
+          [ -n "$TRUENAS_HOST" ] || missing="$missing TRUENAS_HOST(variable)"
+          [ -n "$KNOWN_HOSTS" ] || missing="$missing TRUENAS_KNOWN_HOSTS(variable)"
+          [ "$HAS_KEY" = true ] || missing="$missing DEPLOY_SSH_KEY(secret)"
+          [ "$HAS_TS" = true ] || missing="$missing TS_OAUTH_CLIENT_ID/TS_OAUTH_SECRET(secrets)"
+          [ -z "$missing" ] || { echo "Missing, see docs/deploy/setup.md:$missing"; exit 1; }
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: compose
+          path: compose
+
+      # An ephemeral tag:ci device; the tailnet ACL lets it reach only TrueNAS port 22.
+      - uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Set up the SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.TRUENAS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      # The key is locked to deploy.sh on the server, which takes only this command and the compose file.
+      - name: Deploy ${{ github.sha }} to ${{ inputs.copy }}
+        env:
+          COPY: ${{ inputs.copy }}
+        run: |
+          case "$COPY" in test) target=test ;; production) target=prod ;; *) echo "Unknown copy $COPY"; exit 1 ;; esac
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            "deploy@$TRUENAS_HOST" "deploy $target ${{ github.sha }}" < "compose/$COPY/docker-compose.yaml"

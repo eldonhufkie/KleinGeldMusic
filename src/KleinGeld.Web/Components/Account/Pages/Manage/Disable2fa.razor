@@ -4,6 +4,7 @@
 @using KleinGeld.Data
 
 @inject UserManager<Member> UserManager
+@inject SignInManager<Member> SignInManager
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<Disable2fa> Logger
 
@@ -63,6 +64,9 @@
         {
             throw new InvalidOperationException("Unexpected error occurred disabling 2FA.");
         }
+
+        // Sessions are checked against the security stamp on every request, and this changed it.
+        await SignInManager.RefreshSignInAsync(user);
 
         var userId = await UserManager.GetUserIdAsync(user);
         Logger.LogInformation("User with ID '{UserId}' has disabled 2fa.", userId);

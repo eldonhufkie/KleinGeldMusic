@@ -23,7 +23,9 @@ public sealed class LoginTests(KleinGeldApp app)
 
         var me = await client.GetFromJsonAsync<MeResponse>("/api/me");
 
-        Assert.Equal(new MeResponse(KleinGeldApp.AdminEmail, IsAdmin: true), me);
+        // Not ManagesArtist: tests share the app, and some give the Admin an Artist of their own.
+        Assert.Equal(KleinGeldApp.AdminEmail, me!.Email);
+        Assert.True(me.IsAdmin);
     }
 
     [Fact]
@@ -48,6 +50,18 @@ public sealed class LoginTests(KleinGeldApp app)
         using var response = await client.GetAsync("/api/me");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Every_page_with_a_Log_out_button_clears_the_saved_player_state_on_logout()
+    {
+        using var client = await app.LoginAsNewMemberAsync();
+
+        var page = await client.GetStringAsync("/Account/Manage");
+
+        Assert.Contains("logout", page[page.IndexOf("<script", StringComparison.Ordinal)..]);
+        var script = await client.GetStringAsync("/logout.js");
+        Assert.Contains("localStorage.removeItem(\"kleingeld.player\")", script);
     }
 
     [Fact]

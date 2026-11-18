@@ -1,0 +1,326 @@
+@page "/playlists/{Id:guid}/{Slug?}"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject PlayerService Player
+@inject IJSRuntime JS
+@inject KleinGeld.Web.Client.Playlists.IPlaylistsState MyPlaylists
+@implements IAsyncDisposable
+
+@* A Playlist as its Member sees it. Nobody else can open it. *@
+
+<PageTitle>@(_playlist?.Name ?? "Playlist") · KleinGeld Music</PageTitle>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+else if (_playlist is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    @if (_playlist.Cover is { } cover)
+    {
+        <img src="@cover.Small" alt="" width="160" height="160" />
+    }
+    @if (_renaming)
+    {
+        <EditForm Model="_rename" OnValidSubmit="RenameAsync">
+            <DataAnnotationsValidator />
+            <label>Name <InputText @bind-Value="_rename.Name" maxlength="@PlaylistForm.NameMaxLength" /></label>
+            <ValidationMessage For="() => _rename.Name" />
+            <button type="submit" disabled="@_busy">Save</button>
+            <button type="button" @onclick="() => _renaming = false">Cancel</button>
+        </EditForm>
+    }
+    else
+    {
+        <h1>@_playlist.Name</h1>
+        <p>
+            <button type="button" @onclick="StartRename">Rename</button>
+            <button type="button" @onclick="() => _confirmingDelete = true">Delete</button>
+        </p>
+    }
+    @if (_confirmingDelete)
+    {
+        <p role="alert">
+            Delete @_playlist.Name for good? This can't be undone.
+            <button type="button" disabled="@_busy" @onclick="DeleteAsync">Delete</button>
+            <button type="button" @onclick="() => _confirmingDelete = false">Cancel</button>
+        </p>
+    }
+    @if (_removed is { } removed)
+    {
+        <p role="status">
+            Took @removed.Title off the Playlist.
+            <button type="button" disabled="@_busy" @onclick="UndoAsync">Undo</button>
+        </p>
+    }
+    <p>
+        @_playlist.Tracks.Count @(_playlist.Tracks.Count == 1 ? "Track" : "Tracks")
+        · @_playlist.TotalDuration.ToString(_playlist.TotalDuration.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss")
+    </p>
+    <p>
+        <button type="button" disabled="@(!Playable.Any())" @onclick="PlayAsync">Play</button>
+        <button type="button" disabled="@(!Playable.Any())" @onclick="ShuffleAsync">Shuffle</button>
+    </p>
+
+    @if (UnavailableCount > 0)
+    {
+        <p>
+            <button type="button" disabled="@_busy" @onclick="() => _confirmingClear = true">Clear Unavailable Tracks (@UnavailableCount)</button>
+        </p>
+    }
+    @if (_confirmingClear)
+    {
+        <p role="alert">
+            Clear @UnavailableCount Unavailable @(UnavailableCount == 1 ? "Track" : "Tracks") off @_playlist.Name?
+            <button type="button" disabled="@_busy" @onclick="ClearUnavailableAsync">Clear</button>
+            <button type="button" @onclick="() => _confirmingClear = false">Cancel</button>
+        </p>
+    }
+
+    <ol class="release-tracks" @ref="_list">
+        @for (var i = 0; i < _playlist.Tracks.Count; i++)
+        {
+            var track = _playlist.Tracks[i];
+            var number = i + 1;
+            @if (track.IsAvailable)
+            {
+                <li @key="track.EntryId" data-track-id="@track.EntryId" @onclick="() => PlayFromAsync(track)">
+                    <button type="button" class="track-handle" @onclick:stopPropagation="true" aria-label="Move @track.Title, or use the arrow keys">⠿</button>
+                    <span>@number</span>
+                    <button type="button" aria-label="Play @track.Title">Play</button>
+                    <span class="release-track-title">
+                        @track.Title
+                        @if (track.FeaturedArtists is not null)
+                        {
+                            <span>feat. @track.FeaturedArtists</span>
+                        }
+                        <TrackBadges Track="@(new TrackSummary(track.TrackId!.Value, track.Title, 0, TrackStatus.Ready, track.SingleMark, Explicit: track.Explicit))" />
+                        <span @onclick:stopPropagation="true">
+                            <a href="artists/@track.ArtistId">@track.ArtistName</a>
+                            · <a href="releases/@track.ReleaseId/@track.ReleaseSlug">@track.ReleaseTitle</a>
+                        </span>
+                    </span>
+                    <span>@track.Duration?.ToString(@"m\:ss")</span>
+                    <TrackMenu Track="ToPlayerTrack(track)" />
+                    <button type="button" @onclick:stopPropagation="true" @onclick="() => RemoveAsync(track)">Take off Playlist</button>
+                </li>
+            }
+            else
+            {
+                <li @key="track.EntryId" data-track-id="@track.EntryId" class="unavailable">
+                    <button type="button" class="track-handle" aria-label="Move @track.Title, or use the arrow keys">⠿</button>
+                    <span>@number</span>
+                    <span></span>
+                    <span class="release-track-title">@track.Title <span>@track.ArtistName</span> <span>Unavailable</span></span>
+                    <button type="button" @onclick="() => RemoveAsync(track)">Take off Playlist</button>
+                </li>
+            }
+        }
+    </ol>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [Parameter]
+    public string? Slug { get; set; }
+
+    private PlaylistDetails? _playlist;
+    private bool _failed;
+
+    private IEnumerable<PlaylistTrack> Playable => _playlist?.Tracks.Where(t => t.IsAvailable) ?? [];
+
+    private int UnavailableCount => _playlist?.Tracks.Count(t => !t.IsAvailable) ?? 0;
+
+    private bool _confirmingClear;
+
+    private async Task ClearUnavailableAsync()
+    {
+        _confirmingClear = false;
+        await SaveAsync(() => Http.DeleteAsync($"api/playlists/{Id}/unavailable"));
+    }
+
+    private static PlayerTrack ToPlayerTrack(PlaylistTrack track) =>
+        new(track.TrackId!.Value, track.Title, track.ArtistName, track.IsAvailable);
+
+    private Task PlayAsync() => Player.PlayAsync(Playable.Select(ToPlayerTrack).ToList(), 0);
+
+    private async Task ShuffleAsync()
+    {
+        var tracks = Playable.Select(ToPlayerTrack).ToList();
+        Player.SetShuffle(true);
+        await Player.PlayAsync(tracks, Random.Shared.Next(tracks.Count));
+    }
+
+    private Task PlayFromAsync(PlaylistTrack track)
+    {
+        var tracks = Playable.ToList();
+        return Player.PlayAsync(tracks.Select(ToPlayerTrack).ToList(), tracks.IndexOf(track));
+    }
+
+    private ElementReference _list;
+    private DotNetObjectReference<PlaylistPage>? _self;
+    private bool _attached;
+    private bool _busy;
+    private bool _renaming;
+    private bool _confirmingDelete;
+    private PlaylistForm _rename = new();
+    private RemovedPlaylistEntry? _removed;
+    private CancellationTokenSource? _undoTimer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_attached && _playlist is not null)
+        {
+            _attached = true;
+            _self = DotNetObjectReference.Create(this);
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "/track-reorder.js");
+            await module.InvokeVoidAsync("attach", _list, _self);
+        }
+    }
+
+    /// <summary>Called on a drop: works out which row moved where, and saves that move at once.</summary>
+    [JSInvokable]
+    public async Task Reorder(List<Guid> entryIds)
+    {
+        var old = _playlist!.Tracks.Select(t => t.EntryId).ToList();
+        var first = Enumerable.Range(0, old.Count).FirstOrDefault(i => old[i] != entryIds[i]);
+        var last = Enumerable.Range(0, old.Count).LastOrDefault(i => old[i] != entryIds[i]);
+        var moved = entryIds.Where(id => id != entryIds[first]).SequenceEqual(old.Where(id => id != entryIds[first]))
+            ? (Id: entryIds[first], Position: first + 1)
+            : (Id: entryIds[last], Position: last + 1);
+        await SaveAsync(() => Http.PutAsJsonAsync(
+            $"api/playlists/{Id}/entries/{moved.Id}/position", new MovePlaylistEntryForm { Position = moved.Position }));
+    }
+
+    private async Task RemoveAsync(PlaylistTrack track)
+    {
+        await SaveAsync(async () =>
+        {
+            var response = await Http.DeleteAsync($"api/playlists/{Id}/entries/{track.EntryId}");
+            if (response.IsSuccessStatusCode)
+            {
+                var removed = await response.Content.ReadFromJsonAsync<RemovedPlaylistEntry>();
+                // A Track that no longer exists can't be put back, so there's nothing to Undo.
+                if (removed?.TrackId is not null)
+                {
+                    _removed = removed;
+                    _ = HideUndoLaterAsync();
+                }
+            }
+            return response;
+        });
+    }
+
+    // The Undo notice stays a few seconds.
+    private async Task HideUndoLaterAsync()
+    {
+        _undoTimer?.Cancel();
+        _undoTimer = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(6), _undoTimer.Token);
+            _removed = null;
+            StateHasChanged();
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private async Task UndoAsync()
+    {
+        var removed = _removed;
+        _undoTimer?.Cancel();
+        _removed = null;
+        await SaveAsync(() => Http.PostAsJsonAsync($"api/playlists/{Id}/entries/restore", removed));
+    }
+
+    private void StartRename()
+    {
+        _rename = new PlaylistForm { Name = _playlist!.Name };
+        _renaming = true;
+    }
+
+    private async Task RenameAsync()
+    {
+        await SaveAsync(() => Http.PutAsJsonAsync($"api/playlists/{Id}", _rename));
+        _renaming = false;
+        if (_playlist is not null && _playlist.Slug != Slug)
+        {
+            Navigation.NavigateTo($"playlists/{_playlist.Id}/{_playlist.Slug}", replace: true);
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        _busy = true;
+        using var response = await Http.DeleteAsync($"api/playlists/{Id}");
+        _busy = false;
+        if (!response.IsSuccessStatusCode)
+        {
+            _failed = true;
+            return;
+        }
+        await MyPlaylists.LoadAsync();
+        Navigation.NavigateTo("playlists");
+    }
+
+    /// <summary>Sends one edit, then shows the Playlist as the server has it and refreshes the Member's list.</summary>
+    private async Task SaveAsync(Func<Task<HttpResponseMessage>> send)
+    {
+        _busy = true;
+        try
+        {
+            using var response = await send();
+            _failed = !response.IsSuccessStatusCode;
+            if (!_failed)
+            {
+                _playlist = await Http.GetFromJsonAsync<PlaylistDetails>($"api/playlists/{Id}/{_playlist!.Slug}");
+                await MyPlaylists.LoadAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+        StateHasChanged();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _undoTimer?.Cancel();
+        _self?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _playlist = await Http.GetFromJsonAsync<PlaylistDetails>($"api/playlists/{Id}/{Slug}");
+            if (_playlist!.Slug != Slug)
+            {
+                Navigation.NavigateTo($"playlists/{_playlist.Id}/{_playlist.Slug}", replace: true);
+            }
+        }
+        catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.NotFound)
+        {
+            Navigation.NotFound();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+}

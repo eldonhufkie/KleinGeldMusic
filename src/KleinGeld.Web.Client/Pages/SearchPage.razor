@@ -1,0 +1,229 @@
+@page "/search"
+@attribute [Authorize]
+@implements IDisposable
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+@* One search box over Artists, Releases and Tracks. The query lives in the URL, so Back returns to these results. *@
+
+<PageTitle>Search · KleinGeld Music</PageTitle>
+
+<h1>Search</h1>
+
+<input type="search" aria-label="Search Artists, Releases and Tracks" placeholder="Artists, Releases and Tracks"
+       value="@_typed" @oninput="OnInput" autofocus />
+
+@if (_problem is not null)
+{
+    <p role="alert">@_problem</p>
+}
+
+@if (Group is null && _results is { } results)
+{
+    @if (results.Artists.Items.Count + results.Releases.Items.Count + results.Tracks.Items.Count == 0)
+    {
+        <p>Nothing found.</p>
+    }
+    @ArtistsGroup(results.Artists.Items, results.Artists.Next is not null)
+    @ReleasesGroup(results.Releases.Items, results.Releases.Next is not null)
+    @TracksGroup(results.Tracks.Items, results.Tracks.Next is not null)
+}
+else if (Group is not null)
+{
+    <p><a href="@SearchUrl(Q, null)">All results</a></p>
+    @switch (Group)
+    {
+        case "artists": @ArtistsGroup(_artists, false) break;
+        case "releases": @ReleasesGroup(_releases, false) break;
+        case "tracks": @TracksGroup(_tracks, false) break;
+    }
+    @if (_next is not null)
+    {
+        <p><button type="button" disabled="@_loading" @onclick="LoadMoreAsync">Load more</button></p>
+    }
+}
+
+@code {
+    private const int DebounceMilliseconds = 300;
+
+    [SupplyParameterFromQuery]
+    public string? Q { get; set; }
+
+    /// <summary>Set by Show all: one group, with Load more.</summary>
+    [SupplyParameterFromQuery]
+    public string? Group { get; set; }
+
+    private string _typed = "";
+    private SearchResults? _results;
+    private readonly List<ArtistCard> _artists = [];
+    private readonly List<SearchRelease> _releases = [];
+    private readonly List<SearchTrack> _tracks = [];
+    private string? _next;
+    private bool _loading;
+    private string? _problem;
+    private CancellationTokenSource? _debounce;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _typed = Q ?? "";
+        _results = null;
+        _artists.Clear();
+        _releases.Clear();
+        _tracks.Clear();
+        _next = null;
+        if (_typed.Trim().Length < 2)
+        {
+            return;
+        }
+
+        await LoadAsync(after: null);
+    }
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        _typed = e.Value?.ToString() ?? "";
+        _debounce?.Cancel();
+        _debounce = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(DebounceMilliseconds, _debounce.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        // Replacing keeps Back from stepping through every pause in typing.
+        Navigation.NavigateTo(SearchUrl(_typed, null), replace: true);
+    }
+
+    private async Task LoadMoreAsync() => await LoadAsync(_next);
+
+    private async Task LoadAsync(string? after)
+    {
+        _loading = true;
+        _problem = null;
+        var q = Uri.EscapeDataString(Q ?? "");
+        var more = after is null ? "" : $"&after={after}";
+        try
+        {
+            switch (Group)
+            {
+                case "artists":
+                    var artists = await Http.GetFromJsonAsync<SearchPage<ArtistCard>>($"api/search/artists?q={q}{more}");
+                    _artists.AddRange(artists!.Items);
+                    _next = artists.Next;
+                    break;
+                case "releases":
+                    var releases = await Http.GetFromJsonAsync<SearchPage<SearchRelease>>($"api/search/releases?q={q}{more}");
+                    _releases.AddRange(releases!.Items);
+                    _next = releases.Next;
+                    break;
+                case "tracks":
+                    var tracks = await Http.GetFromJsonAsync<SearchPage<SearchTrack>>($"api/search/tracks?q={q}{more}");
+                    _tracks.AddRange(tracks!.Items);
+                    _next = tracks.Next;
+                    break;
+                default:
+                    _results = await Http.GetFromJsonAsync<SearchResults>($"api/search?q={q}");
+                    break;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _problem = "Something went wrong. Reload the page and try again.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string SearchUrl(string? q, string? group) =>
+        Navigation.GetUriWithQueryParameters("search", new Dictionary<string, object?>
+        {
+            ["q"] = string.IsNullOrWhiteSpace(q) ? null : q,
+            ["group"] = group,
+        });
+
+    private RenderFragment ShowAll(string group, bool more) => more
+        ? @<p><a href="@SearchUrl(Q, group)">Show all</a></p>
+        : @<text></text>;
+
+    private RenderFragment ArtistsGroup(IReadOnlyList<ArtistCard> artists, bool more) => @<text>
+        @if (artists.Count > 0)
+        {
+            <h2>Artists</h2>
+            <ul class="card-grid">
+                @foreach (var artist in artists)
+                {
+                    <li @key="artist.Id">
+                        <a href="artists/@artist.Id/@artist.Slug">
+                            @if (artist.Cover is not null)
+                            {
+                                <img class="cover-art" src="@artist.Cover.Small" alt="" loading="lazy" />
+                            }
+                            else
+                            {
+                                <span class="cover-missing"></span>
+                            }
+                            <span>@artist.Name</span>
+                        </a>
+                    </li>
+                }
+            </ul>
+            @ShowAll("artists", more)
+        }
+    </text>;
+
+    private RenderFragment ReleasesGroup(IReadOnlyList<SearchRelease> releases, bool more) => @<text>
+        @if (releases.Count > 0)
+        {
+            <h2>Releases</h2>
+            <ul class="card-grid">
+                @foreach (var release in releases)
+                {
+                    <li @key="release.Id">
+                        <a href="releases/@release.Id/@release.Slug">
+                            @if (release.Cover is not null)
+                            {
+                                <img class="cover-art" src="@release.Cover.Small" alt="" loading="lazy" />
+                            }
+                            else
+                            {
+                                <span class="cover-missing"></span>
+                            }
+                            <span>@release.Title</span>
+                            <span>@release.ArtistName</span>
+                        </a>
+                    </li>
+                }
+            </ul>
+            @ShowAll("releases", more)
+        }
+    </text>;
+
+    private RenderFragment TracksGroup(IReadOnlyList<SearchTrack> tracks, bool more) => @<text>
+        @if (tracks.Count > 0)
+        {
+            <h2>Tracks</h2>
+            <ul>
+                @foreach (var track in tracks)
+                {
+                    <li @key="track.Id">
+                        <a href="releases/@track.ReleaseId/@track.ReleaseSlug">@track.Title</a>
+                        @if (track.FeaturedArtists is not null)
+                        {
+                            <span> (feat. @track.FeaturedArtists)</span>
+                        }
+                        <span> · @track.ArtistName · @track.ReleaseTitle</span>
+                        <TrackMenu Track="new PlayerTrack(track.Id, track.Title, track.ArtistName)" />
+                    </li>
+                }
+            </ul>
+            @ShowAll("tracks", more)
+        }
+    </text>;
+
+    public void Dispose() => _debounce?.Cancel();
+}

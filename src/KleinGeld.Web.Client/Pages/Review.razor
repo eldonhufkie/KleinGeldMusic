@@ -1,0 +1,170 @@
+@page "/admin/review"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inject HttpClient Http
+@inject IReviewCountState ReviewCount
+
+@* The Submitted Releases, oldest first, so the Admin works through them fairly. *@
+
+<PageTitle>Review · KleinGeld Music</PageTitle>
+
+<h1>Review</h1>
+
+@if (_failed)
+{
+    <p role="alert">Something went wrong. Reload the page and try again.</p>
+}
+
+@if (_releases is null)
+{
+    <p>@(_failed ? "" : "Loading…")</p>
+}
+else if (_releases.Count == 0)
+{
+    <p>Nothing is waiting for review.</p>
+}
+else
+{
+    <ul class="join-requests">
+        @foreach (var release in _releases)
+        {
+            <li class="join-request">
+                <p><a href="releases/@release.Id/@release.Slug"><strong>@release.Title</strong></a> by @release.ArtistName <span class="stage-badge">@release.Type</span></p>
+                <p>
+                    Submitted @release.SubmittedAt.ToString("d MMMM yyyy, HH:mm")
+                    by @(release.RightsDeclarations[0].MemberName ?? "a former Member"),
+                    with Rights Declaration version @release.RightsDeclarations[0].WordingVersion
+                </p>
+                @if (release.IsPendingChanges)
+                {
+                    @* Only what changed: the Release itself was approved before. *@
+                    <p><span class="stage-badge">Pending Changes</span> Added Tracks:</p>
+                    <ol>
+                        @foreach (var track in release.AddedTracks ?? [])
+                        {
+                            <li>@track.Title @track.Duration?.ToString(@"m\:ss")</li>
+                        }
+                    </ol>
+                    @if (release.RemovedTracks is { Count: > 0 } removed)
+                    {
+                        <p>Removed Tracks:</p>
+                        <ul>
+                            @foreach (var track in removed)
+                            {
+                                <li>@track.Position. @track.Title</li>
+                            }
+                        </ul>
+                    }
+                    @if (release.ReplacedTracks is { Count: > 0 } replaced)
+                    {
+                        <p>Tracks with new audio:</p>
+                        <ul>
+                            @foreach (var track in replaced)
+                            {
+                                <li>
+                                    @track.Position. @track.Title @track.Duration?.ToString(@"m\:ss")
+                                    @* The Admin compares the live audio with the new audio before approving. *@
+                                    <div class="join-request-actions">
+                                        <button type="button" @onclick="() => ListenAsync(track.Id, old: true)">Play old audio</button>
+                                        <button type="button" @onclick="() => ListenAsync(track.Id, old: false)">Play new audio</button>
+                                    </div>
+                                    @if (_listening is { } listening && listening.TrackId == track.Id)
+                                    {
+                                        <audio controls autoplay src="@listening.Url" aria-label="@(listening.Old ? "Old" : "New") audio of @track.Title"></audio>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
+                }
+                @if (_rejecting == release.Id)
+                {
+                    <label for="reject-reason">Why is it rejected? The Artist's managers will read this.</label>
+                    <textarea id="reject-reason" rows="4" maxlength="@RejectForm.ReasonMaxLength" @bind="_reason" @bind:event="oninput"></textarea>
+                    <div class="join-request-actions">
+                        <button type="button" disabled="@(_busy || string.IsNullOrWhiteSpace(_reason))" @onclick="() => RejectAsync(release)">
+                            @(_busy ? "Rejecting…" : "Reject")
+                        </button>
+                        <button type="button" disabled="@_busy" @onclick="() => _rejecting = null">Cancel</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="join-request-actions">
+                        <button type="button" disabled="@_busy" @onclick="() => StartRejecting(release)">Reject</button>
+                    </div>
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private List<ReviewRelease>? _releases;
+    private bool _failed;
+
+    /// <summary>The Release whose reason is being typed.</summary>
+    private Guid? _rejecting;
+    private string _reason = "";
+    private bool _busy;
+
+    /// <summary>The old or new audio of a replaced Track the Admin is listening to.</summary>
+    private (Guid TrackId, bool Old, string Url)? _listening;
+
+    private async Task ListenAsync(Guid trackId, bool old)
+    {
+        _failed = false;
+        try
+        {
+            var link = await Http.GetFromJsonAsync<PlayLink>($"api/tracks/{trackId}/play-link{(old ? "?old=true" : "")}");
+            _listening = (trackId, old, link!.Url.ToString());
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+
+    private void StartRejecting(ReviewRelease release)
+    {
+        _rejecting = release.Id;
+        _reason = "";
+    }
+
+    private async Task RejectAsync(ReviewRelease release)
+    {
+        _busy = true;
+        _failed = false;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync($"api/admin/review/releases/{release.Id}/reject", new RejectForm { Reason = _reason });
+            _failed = !response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+            {
+                _releases!.Remove(release);
+                _rejecting = null;
+                await ReviewCount.LoadAsync();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _releases = await Http.GetFromJsonAsync<List<ReviewRelease>>("api/admin/review");
+            await ReviewCount.LoadAsync();
+        }
+        catch (HttpRequestException)
+        {
+            _failed = true;
+        }
+    }
+}
