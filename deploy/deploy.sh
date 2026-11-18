@@ -46,4 +46,5 @@ mv -f "$compose" "$dir/docker-compose.yaml"
 mv -f "$release" "$dir/release.env"
 
 echo "Deploying $tag to $app"
-midclt call app.redeploy "$app"
+# -job waits for the redeploy to finish and fails if it fails, instead of returning once it starts.
+midclt call -job app.redeploy "$app"

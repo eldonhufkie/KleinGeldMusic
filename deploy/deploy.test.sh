@@ -33,18 +33,18 @@ run "deploy test $sha" "services: {}"
 check "deploys to Test" '[ $status -eq 0 ]'
 check "writes the compose file for Test" '[ "$(cat "$root/test/docker-compose.yaml")" = "services: {}" ]'
 check "writes release.env for Test" '[ "$(cat "$root/test/release.env")" = "KLEINGELD_TAG=$sha" ]'
-check "redeploys kleingeld-test" '[ "$(cat "$root/midclt.log")" = "call app.redeploy kleingeld-test" ]'
+check "redeploys kleingeld-test" '[ "$(cat "$root/midclt.log")" = "call -job app.redeploy kleingeld-test" ]'
 check "leaves Production alone" '[ -z "$(ls "$root/production")" ]'
 
 setup
 run "deploy prod $sha" "services: {}"
 check "deploys to Production" '[ $status -eq 0 ]'
 check "writes release.env for Production" '[ "$(cat "$root/production/release.env")" = "KLEINGELD_TAG=$sha" ]'
-check "redeploys kleingeld" '[ "$(cat "$root/midclt.log")" = "call app.redeploy kleingeld" ]'
+check "redeploys kleingeld" '[ "$(cat "$root/midclt.log")" = "call -job app.redeploy kleingeld" ]'
 
 setup
 out="$(printf 'services: {}' | PATH="$root/bin:$PATH" "$root/deploy.sh" "deploy test $sha" 2>&1)"; status=$?
-check "takes the command as an argument (the sudo form)" '[ $status -eq 0 ] && [ "$(cat "$root/midclt.log")" = "call app.redeploy kleingeld-test" ]'
+check "takes the command as an argument (the sudo form)" '[ $status -eq 0 ] && [ "$(cat "$root/midclt.log")" = "call -job app.redeploy kleingeld-test" ]'
 
 setup
 out="$(printf 'services: {}' | PATH="$root/bin:$PATH" "$root/deploy.sh" deploy test "$sha" 2>&1)"; status=$?

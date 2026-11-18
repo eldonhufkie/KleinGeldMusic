@@ -15,7 +15,7 @@ Deploy__Copy=Test Deploy__Pool=tank aspire publish --apphost src/KleinGeld.AppHo
 - Add the repository secrets `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_SECRET` (a Tailscale OAuth client with the `auth_keys` write scope for `tag:ci`) and `DEPLOY_SSH_KEY` (the private half of the `deploy` key below).
 - In the Tailscale ACL, let `tag:ci` reach only TrueNAS port 22, e.g. a grant `{"src": ["tag:ci"], "dst": ["truenas"], "ip": ["tcp:22"]}` with `tag:ci` owned by the admin in `tagOwners`. The OAuth client makes each runner an ephemeral device.
 - Create the Environments `test` (no rules) and `production` (required reviewer: the owner). The deploy job waits on `production` before deploying to Production.
-- After the first push to `main`, make the `kleingeld-web` and `kleingeld-migrator` GHCR packages public (package settings → Change visibility), so TrueNAS pulls without credentials. CI keeps the last 10 versions of each.
+- After the first push to `main`, make the `kleingeld-web`, `kleingeld-worker` and `kleingeld-migrator` GHCR packages public (package settings → Change visibility), so TrueNAS pulls without credentials. CI keeps the last 10 versions of each.
 
 ## Datasets and ownership
 
@@ -60,7 +60,7 @@ ssh deploy@$TRUENAS_HOST "deploy test|prod <sha>" < docker-compose.yaml
 
 The key is effectively root on TrueNAS: whoever holds it can deploy any compose file, privileged containers included. Keep it only in the GitHub secret and rotate it if it leaks.
 
-`deploy.sh` accepts only `deploy test <sha>` or `deploy prod <sha>` (a full 40-character commit SHA), with the compose file on stdin. It writes `docker-compose.yaml` and `release.env` into the copy's folder and runs `midclt call app.redeploy kleingeld-test` or `… kleingeld`. Its tests run in CI: `bash deploy/deploy.test.sh`.
+`deploy.sh` accepts only `deploy test <sha>` or `deploy prod <sha>` (a full 40-character commit SHA), with the compose file on stdin. It writes `docker-compose.yaml` and `release.env` into the copy's folder and runs `midclt call -job app.redeploy kleingeld-test` or `… kleingeld`. Its tests run in CI: `bash deploy/deploy.test.sh`.
 
 ## Rolling back
 
@@ -71,7 +71,7 @@ Every published version is a commit SHA; GHCR keeps the last 10 of each image.
 
    ```sh
    echo "KLEINGELD_TAG=<earlier sha>" > /mnt/<pool>/Applications/kleingeld/production/release.env
-   midclt call app.redeploy kleingeld
+   midclt call -job app.redeploy kleingeld
    ```
 
    For Test, use the `test` folder and `kleingeld-test`.
